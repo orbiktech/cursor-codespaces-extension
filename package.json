@@ -24,8 +24,52 @@
         "command": "cursorCodespaces.connect",
         "title": "Connect to Codespace",
         "category": "Cursor Codespaces"
+      },
+      {
+        "command": "cursorCodespaces.connectToCodespaceFromExplorer",
+        "title": "Connect",
+        "icon": "$(remote)"
+      },
+      {
+        "command": "cursorCodespaces.refreshExplorer",
+        "title": "Refresh",
+        "icon": "$(refresh)"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codespaces",
+          "title": "GitHub Codespaces",
+          "icon": "$(remote)"
+        }
+      ]
+    },
+    "views": {
+      "codespaces": [
+        {
+          "id": "codespacesExplorer",
+          "name": "Codespaces",
+          "when": "true"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "cursorCodespaces.refreshExplorer",
+          "when": "view == codespacesExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cursorCodespaces.connectToCodespaceFromExplorer",
+          "when": "view == codespacesExplorer && viewItem == codespace",
+          "group": "inline"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

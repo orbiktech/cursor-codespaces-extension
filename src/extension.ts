@@ -4,19 +4,81 @@ import { SshConfigManager } from './sshConfig';
 import { CodespacePicker } from './codespacePicker';
 import { RemoteSshBridge } from './remoteSsh';
 import { DevcontainerFixer } from './devcontainerFixer';
+import { CodespaceExplorerProvider, CodespaceTreeItem } from './codespaceExplorer';
+import { Codespace } from './ghService';
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Cursor Codespaces extension is now active!');
+	// Extension activated
 
-	// Main connect command
+	// Create codespace explorer
+	const codespaceExplorerProvider = new CodespaceExplorerProvider();
+	const treeView = vscode.window.createTreeView('codespacesExplorer', {
+		treeDataProvider: codespaceExplorerProvider,
+		showCollapseAll: false
+	});
+
+	context.subscriptions.push(treeView);
+
+	// Main connect command (from command palette/status bar)
 	const connectCommand = vscode.commands.registerCommand(
 		'cursorCodespaces.connect',
 		async () => {
 			await connectToCodespace();
+			// Refresh explorer after connecting
+			codespaceExplorerProvider.refresh();
 		}
 	);
 
 	context.subscriptions.push(connectCommand);
+
+	// Connect from explorer
+	const connectFromExplorerCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.connectToCodespaceFromExplorer',
+		async (item: CodespaceTreeItem | Codespace) => {
+			// Handle both tree item and codespace object
+			let codespace: Codespace;
+			if (item instanceof CodespaceTreeItem) {
+				codespace = item.codespace;
+			} else {
+				codespace = item;
+			}
+			
+			if (!codespace || !codespace.name) {
+				await vscode.window.showErrorMessage(
+					'Failed to get codespace information. Please try refreshing the explorer.'
+				);
+				return;
+			}
+
+			// Prevent multiple clicks - check if already connecting
+			if (codespaceExplorerProvider.isConnecting(codespace.name)) {
+				return; // Already connecting, ignore click
+			}
+
+			// Mark as connecting immediately for instant feedback
+			codespaceExplorerProvider.setConnecting(codespace.name, true);
+			
+			try {
+				await connectToCodespace(codespace);
+			} finally {
+				// Always clear connecting state and refresh
+				codespaceExplorerProvider.setConnecting(codespace.name, false);
+				codespaceExplorerProvider.refresh();
+			}
+		}
+	);
+
+	context.subscriptions.push(connectFromExplorerCommand);
+
+	// Refresh explorer command
+	const refreshExplorerCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.refreshExplorer',
+		async () => {
+			codespaceExplorerProvider.refresh();
+		}
+	);
+
+	context.subscriptions.push(refreshExplorerCommand);
 
 	// Create status bar item
 	const statusBarItem = vscode.window.createStatusBarItem(
@@ -31,7 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(statusBarItem);
 }
 
-async function connectToCodespace(): Promise<void> {
+async function connectToCodespace(selectedCodespace?: Codespace): Promise<void> {
 	const ghService = GhService.getInstance();
 	const sshConfigManager = SshConfigManager.getInstance();
 	const codespacePicker = CodespacePicker.getInstance();
@@ -57,24 +119,33 @@ async function connectToCodespace(): Promise<void> {
 			return;
 		}
 
-		// Step 3: Pick a codespace (always fetch fresh list)
-		// Refresh codespace list to get latest status
-		const codespace = await codespacePicker.pickCodespace();
+		// Step 3: Get codespace (either from parameter or picker)
+		let codespace: Codespace | undefined = selectedCodespace;
+		
 		if (!codespace) {
+			// Pick a codespace (always fetch fresh list)
+			// Refresh codespace list to get latest status
+			codespace = await codespacePicker.pickCodespace();
+			if (!codespace) {
+				return;
+			}
+		}
+
+		// Step 4: Always refresh codespace status to get latest state
+		// This is important especially when coming from the explorer (stale data)
+		const allCodespaces = await ghService.listCodespaces();
+		let latestCodespace = allCodespaces.find(cs => cs.name === codespace.name);
+		
+		if (!latestCodespace) {
+			await vscode.window.showErrorMessage(
+				`Codespace ${codespace.name} not found. It may have been deleted.`
+			);
 			return;
 		}
 
-		// Step 4: Ensure codespace is available (wait if it's starting)
-		// Note: Codespaces may start automatically when accessed via SSH
-		// Always check latest status, as codespace state may have changed
-		let latestCodespace = codespace;
-		const allCodespaces = await ghService.listCodespaces();
-		const updatedCodespace = allCodespaces.find(cs => cs.name === codespace.name);
-		if (updatedCodespace) {
-			latestCodespace = updatedCodespace;
-		}
-
+		// Step 5: Ensure codespace is available (start if needed, wait if it's starting)
 		if (latestCodespace.state !== 'Available') {
+			const codespaceName = latestCodespace.name; // Store name to avoid TS issues
 			await vscode.window.withProgress(
 				{
 					location: vscode.ProgressLocation.Notification,
@@ -82,7 +153,7 @@ async function connectToCodespace(): Promise<void> {
 					cancellable: false
 				},
 				async (progress) => {
-					await ghService.ensureCodespaceAvailable(codespace.name, progress);
+					await ghService.ensureCodespaceAvailable(codespaceName, progress);
 				}
 			);
 			
@@ -94,7 +165,7 @@ async function connectToCodespace(): Promise<void> {
 			}
 		}
 
-		// Step 5: Generate SSH config
+		// Step 6: Generate SSH config
 		let sshConfig: string;
 		try {
 			sshConfig = await ghService.generateSshConfig(codespace.name);
@@ -106,7 +177,7 @@ async function connectToCodespace(): Promise<void> {
 			throw error;
 		}
 
-		// Step 6: Prepare repository-based host name
+		// Step 7: Prepare repository-based host name
 		// Repository format: "owner/repo-name" (e.g., "github-org/my-repo")
 		if (!codespace.repository || !codespace.repository.includes('/')) {
 			throw new Error(`Invalid repository format: ${codespace.repository}. Expected format: owner/repo-name`);
@@ -123,7 +194,7 @@ async function connectToCodespace(): Promise<void> {
 		// Modify SSH config to use repository name as Host (like the working extension)
 		const modifiedSshConfig = sshConfig.replace(/^(Host\s+).*/m, `$1${repoName}`);
 
-		// Step 7: Merge SSH config
+		// Step 8: Merge SSH config
 		await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
@@ -135,7 +206,7 @@ async function connectToCodespace(): Promise<void> {
 			}
 		);
 
-		// Step 8: Connect via Remote-SSH using the same approach as the working extension
+		// Step 9: Connect via Remote-SSH using the same approach as the working extension
 		// Brief delay to ensure SSH config is recognized (already waited in remoteSsh.ts)
 		
 		// Use the same URI format as the working extension: vscode-remote://ssh-remote+${repoName}/workspaces/${simpleRepoName}
