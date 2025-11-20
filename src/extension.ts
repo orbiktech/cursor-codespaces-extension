@@ -17,6 +17,18 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	context.subscriptions.push(connectCommand);
+
+	// Create status bar item
+	const statusBarItem = vscode.window.createStatusBarItem(
+		vscode.StatusBarAlignment.Right,
+		100
+	);
+	statusBarItem.command = 'cursorCodespaces.connect';
+	statusBarItem.text = '$(remote) Connect to Codespace';
+	statusBarItem.tooltip = 'Connect to a GitHub Codespace';
+	statusBarItem.show();
+
+	context.subscriptions.push(statusBarItem);
 }
 
 async function connectToCodespace(): Promise<void> {

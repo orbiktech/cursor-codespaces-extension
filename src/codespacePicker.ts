@@ -32,8 +32,9 @@ export class CodespacePicker {
 			// Create QuickPick items
 			const items = codespaces.map(codespace => {
 				const stateIcon = codespace.state === 'Available' ? '✓' : '⏸';
-				const label = `${stateIcon} ${codespace.displayName || codespace.name}`;
-				const description = `${codespace.repository} • ${codespace.state}`;
+				// Use repository as the main label (highlighted info)
+				const label = `${stateIcon} ${codespace.repository}`;
+				const description = `${codespace.displayName || codespace.name} • ${codespace.state}`;
 				const detail = codespace.lastUsedAt 
 					? `Last used: ${new Date(codespace.lastUsedAt).toLocaleString()}`
 					: 'Never used';
