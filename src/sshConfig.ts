@@ -106,35 +106,5 @@ export class SshConfigManager {
 		}
 	}
 
-	/**
-	 * Extract host name from SSH config block
-	 */
-	extractHostName(configBlock: string): string | null {
-		const hostMatch = configBlock.match(/^Host\s+(\S+)/m);
-		return hostMatch ? hostMatch[1] : null;
-	}
-
-	/**
-	 * Get all managed host names
-	 */
-	async getManagedHosts(): Promise<string[]> {
-		try {
-			const config = await this.readConfig();
-			const { managed } = this.extractManagedSection(config);
-			
-			if (!managed) {
-				return [];
-			}
-
-			const hostMatches = managed.matchAll(/^Host\s+(\S+)/gm);
-			const hosts: string[] = [];
-			for (const match of hostMatches) {
-				hosts.push(match[1]);
-			}
-			return hosts;
-		} catch (error: any) {
-			throw new Error(`Failed to get managed hosts: ${error.message}`);
-		}
-	}
 }
 

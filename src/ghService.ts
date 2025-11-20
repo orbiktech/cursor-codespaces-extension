@@ -37,51 +37,6 @@ export class GhService {
 	}
 
 	/**
-	 * Check if user is authenticated with GitHub CLI
-	 */
-	async checkAuth(): Promise<{ authenticated: boolean; missingScopes?: string[] }> {
-		try {
-			// Try to list codespaces directly - this is the most reliable check
-			// If this works, user is authenticated and has the right scopes
-			await execAsync('gh codespace list --limit 1', { encoding: 'utf-8' });
-			return { authenticated: true };
-		} catch (error: any) {
-			const errorMessage = (error.stderr || error.stdout || error.message || '').toLowerCase();
-			
-			// Only treat as scope error if the message explicitly mentions scope/permission issues
-			// Be very specific to avoid false positives
-			if (errorMessage.includes('required scope') || 
-			    errorMessage.includes('missing required scope') ||
-			    (errorMessage.includes('needs the') && errorMessage.includes('scope')) ||
-			    errorMessage.includes('needs the "codespace" scope') ||
-			    (errorMessage.includes('insufficient') && errorMessage.includes('scope')) ||
-			    (errorMessage.includes('403') && errorMessage.includes('scope'))) {
-				const missingScopes = ['codespace'];
-				return { authenticated: false, missingScopes };
-			}
-			
-			// Check if it's a clear "not logged in" error
-			if (errorMessage.includes('not logged in') || 
-			    errorMessage.includes('authentication required') ||
-			    errorMessage.includes('you are not logged into any github hosts') ||
-			    errorMessage.includes('no oauth token')) {
-				return { authenticated: false };
-			}
-			
-			// For any other error, assume user might be authenticated but there's a different issue
-			// Don't prompt for scope refresh unless we're certain
-			// Try a simple API call as a fallback
-			try {
-				await execAsync('gh api user', { encoding: 'utf-8' });
-				return { authenticated: true };
-			} catch {
-				// If we can't determine, assume not authenticated but don't assume scope issue
-				return { authenticated: false };
-			}
-		}
-	}
-
-	/**
 	 * Prompt user to login via terminal
 	 */
 	async promptLogin(): Promise<void> {
@@ -170,53 +125,129 @@ export class GhService {
 	}
 
 	/**
-	 * Check if codespace is available, and wait for it if it's starting
-	 * Note: GitHub CLI doesn't have a 'start' command - codespaces start automatically
-	 * when accessed via SSH, but we can check the state and wait if needed
+	 * Start a codespace using GitHub API
 	 */
-	async ensureCodespaceAvailable(codespaceName: string): Promise<void> {
+	async startCodespace(codespaceName: string): Promise<void> {
+		// Sanitize codespace name to prevent command injection
+		if (!/^[a-zA-Z0-9_-]+$/.test(codespaceName)) {
+			throw new Error('Invalid codespace name format');
+		}
+
+		try {
+			// Use GitHub API to start the codespace
+			// Format: POST /user/codespaces/{codespace_name}/start
+			await execAsync(
+				`gh api -X POST user/codespaces/${codespaceName}/start`,
+				{ encoding: 'utf-8' }
+			);
+		} catch (error: any) {
+			const errorMessage = error.stderr || error.message || '';
+			
+			// If codespace is already running, that's fine
+			if (errorMessage.includes('already running') || errorMessage.includes('already started')) {
+				return;
+			}
+			
+			throw new Error(`Failed to start codespace: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Check if codespace is available, and start it if needed, then wait for it
+	 * @param progress Optional progress reporter to update status
+	 */
+	async ensureCodespaceAvailable(
+		codespaceName: string,
+		progress?: { report: (value: { message?: string; increment?: number }) => void }
+	): Promise<void> {
+		// Sanitize codespace name to prevent command injection
+		if (!/^[a-zA-Z0-9_-]+$/.test(codespaceName)) {
+			throw new Error('Invalid codespace name format');
+		}
+
+		// First, check current state and start if needed
+		const codespaces = await this.listCodespaces();
+		const codespace = codespaces.find(cs => cs.name === codespaceName);
+		
+		if (codespace && codespace.state === 'Shutdown') {
+			// Start the codespace
+			if (progress) {
+				progress.report({ message: 'Starting codespace...' });
+			}
+			try {
+				await this.startCodespace(codespaceName);
+			} catch (error: any) {
+				// If start fails, still try to proceed - SSH might trigger it
+				console.warn(`Failed to start codespace via API: ${error.message}. Will attempt SSH connection anyway.`);
+			}
+		}
+
 		// Poll to check if codespace becomes available
-		// Codespaces may be starting or may start automatically when SSH is attempted
-		const maxAttempts = 30;
+		const maxAttempts = 150; // 5 minutes (150 * 2 seconds = 300 seconds)
 		const pollInterval = 2000; // 2 seconds
 		
 		for (let attempt = 0; attempt < maxAttempts; attempt++) {
 			const codespaces = await this.listCodespaces();
 			const codespace = codespaces.find(cs => cs.name === codespaceName);
 			
+			// Update progress message with current state
+			if (progress) {
+				if (codespace) {
+					progress.report({ 
+						message: `Waiting for codespace... Current state: ${codespace.state} (${attempt + 1}/${maxAttempts})` 
+					});
+				} else {
+					progress.report({ 
+						message: `Waiting for codespace... Checking status (${attempt + 1}/${maxAttempts})` 
+					});
+				}
+			}
+			
+			// Only return when codespace is actually Available
 			if (codespace && codespace.state === 'Available') {
 				return;
 			}
 			
-			// If codespace is not found or in a transitional state, wait a bit
-			// It might be starting automatically
+			// If codespace is in Shutdown or Unknown state, it might be starting
+			// Continue polling until it becomes Available
 			if (codespace && (codespace.state === 'Shutdown' || codespace.state === 'Unknown')) {
-				// Codespace might be starting - wait and check again
 				await new Promise(resolve => setTimeout(resolve, pollInterval));
 				continue;
 			}
 			
-			// If codespace is available or in another state, proceed
-			// SSH connection will handle starting if needed
-			if (codespace) {
-				return;
+			// If codespace is in a transitional state (like "Starting"), continue waiting
+			if (codespace && codespace.state !== 'Available') {
+				await new Promise(resolve => setTimeout(resolve, pollInterval));
+				continue;
 			}
 			
+			// If codespace not found, wait and check again
 			await new Promise(resolve => setTimeout(resolve, pollInterval));
 		}
 		
-		// Don't throw error - codespace might start automatically when SSH is attempted
-		// Just log a warning
-		console.warn(`Codespace ${codespaceName} may not be available yet, but will attempt connection anyway`);
+		// After max attempts, throw an error so user knows it's taking too long
+		const timeoutMinutes = maxAttempts * pollInterval / 60000; // Convert to minutes
+		throw new Error(
+			`Codespace did not become available within ${timeoutMinutes} minutes. ` +
+			`Current state may be: ${(await this.listCodespaces()).find(cs => cs.name === codespaceName)?.state || 'Unknown'}. ` +
+			`The codespace may still be starting - you can try connecting again in a moment.`
+		);
 	}
 
 	/**
 	 * Generate SSH configuration for a codespace
 	 */
 	async generateSshConfig(codespaceName: string): Promise<string> {
+		// Sanitize codespace name to prevent command injection
+		// Only allow alphanumeric, hyphens, and underscores
+		if (!/^[a-zA-Z0-9_-]+$/.test(codespaceName)) {
+			throw new Error('Invalid codespace name format');
+		}
+
 		try {
 			const { stdout } = await execAsync(
-				`gh codespace ssh --config -c ${codespaceName}`
+				`gh codespace ssh --config -c ${codespaceName}`,
+				{ encoding: 'utf-8' }
 			);
 			return stdout;
 		} catch (error: any) {

@@ -15,11 +15,13 @@ export class CodespacePicker {
 
 	/**
 	 * Show QuickPick to select a codespace
+	 * Always fetches fresh codespace list to show latest status
 	 */
 	async pickCodespace(): Promise<Codespace | undefined> {
 		const ghService = GhService.getInstance();
 		
 		try {
+			// Always fetch fresh codespace list to get latest status
 			const codespaces = await ghService.listCodespaces();
 			
 			if (codespaces.length === 0) {

@@ -57,7 +57,8 @@ async function connectToCodespace(): Promise<void> {
 			return;
 		}
 
-		// Step 3: Pick a codespace
+		// Step 3: Pick a codespace (always fetch fresh list)
+		// Refresh codespace list to get latest status
 		const codespace = await codespacePicker.pickCodespace();
 		if (!codespace) {
 			return;
@@ -65,17 +66,32 @@ async function connectToCodespace(): Promise<void> {
 
 		// Step 4: Ensure codespace is available (wait if it's starting)
 		// Note: Codespaces may start automatically when accessed via SSH
-		if (codespace.state !== 'Available') {
+		// Always check latest status, as codespace state may have changed
+		let latestCodespace = codespace;
+		const allCodespaces = await ghService.listCodespaces();
+		const updatedCodespace = allCodespaces.find(cs => cs.name === codespace.name);
+		if (updatedCodespace) {
+			latestCodespace = updatedCodespace;
+		}
+
+		if (latestCodespace.state !== 'Available') {
 			await vscode.window.withProgress(
 				{
 					location: vscode.ProgressLocation.Notification,
 					title: 'Waiting for codespace to be available...',
 					cancellable: false
 				},
-				async () => {
-					await ghService.ensureCodespaceAvailable(codespace.name);
+				async (progress) => {
+					await ghService.ensureCodespaceAvailable(codespace.name, progress);
 				}
 			);
+			
+			// After waiting, refresh the codespace status one more time
+			const refreshedCodespaces = await ghService.listCodespaces();
+			const refreshedCodespace = refreshedCodespaces.find(cs => cs.name === codespace.name);
+			if (refreshedCodespace) {
+				latestCodespace = refreshedCodespace;
+			}
 		}
 
 		// Step 5: Generate SSH config
@@ -91,12 +107,18 @@ async function connectToCodespace(): Promise<void> {
 		}
 
 		// Step 6: Prepare repository-based host name
-		// Repository format: "owner/repo-name" (e.g., "trufla-technology/trumarket-api")
+		// Repository format: "owner/repo-name" (e.g., "github-org/my-repo")
+		if (!codespace.repository || !codespace.repository.includes('/')) {
+			throw new Error(`Invalid repository format: ${codespace.repository}. Expected format: owner/repo-name`);
+		}
+
 		const repoName = codespace.repository.replace('/', '-'); // For SSH Host: "owner-repo-name"
 		// For workspace path, we need just the repo name (the part after the slash)
-		const simpleRepoName = codespace.repository.split('/')[1]; // Just "repo-name" (e.g., "trumarket-api")
+		const simpleRepoName = codespace.repository.split('/')[1]; // Just "repo-name" (e.g., "my-repo")
 		
-		console.log(`Repository: ${codespace.repository}, repoName: ${repoName}, simpleRepoName: ${simpleRepoName}`);
+		if (!simpleRepoName) {
+			throw new Error(`Invalid repository format: ${codespace.repository}. Could not extract repo name.`);
+		}
 		
 		// Modify SSH config to use repository name as Host (like the working extension)
 		const modifiedSshConfig = sshConfig.replace(/^(Host\s+).*/m, `$1${repoName}`);
@@ -114,14 +136,30 @@ async function connectToCodespace(): Promise<void> {
 		);
 
 		// Step 8: Connect via Remote-SSH using the same approach as the working extension
-		// Add a small delay to ensure SSH config is recognized
-		await new Promise(resolve => setTimeout(resolve, 500));
+		// Brief delay to ensure SSH config is recognized (already waited in remoteSsh.ts)
 		
 		// Use the same URI format as the working extension: vscode-remote://ssh-remote+${repoName}/workspaces/${simpleRepoName}
 		await remoteSshBridge.connectToHost(repoName, simpleRepoName);
 	} catch (error: any) {
+		// Provide more user-friendly error messages
+		let errorMessage = error.message || 'Unknown error occurred';
+		
+		if (errorMessage.includes('User declined')) {
+			errorMessage = 'Connection cancelled. SSH config modification was declined.';
+		} else if (errorMessage.includes('Invalid repository')) {
+			errorMessage = `Invalid repository format. Please ensure your codespace has a valid repository (owner/repo-name format).`;
+		} else if (errorMessage.includes('Invalid codespace name')) {
+			errorMessage = 'Invalid codespace name format. Please try again.';
+		} else if (errorMessage.includes('SSHD_NOT_CONFIGURED')) {
+			errorMessage = 'SSHD is not configured in your Codespace. Please configure it in your devcontainer.';
+		} else if (errorMessage.includes('AUTHENTICATION_REQUIRED')) {
+			errorMessage = 'GitHub authentication required. Please login using `gh auth login`.';
+		} else if (errorMessage.includes('SCOPE_REQUIRED')) {
+			errorMessage = 'Additional GitHub scopes required. Please refresh authentication with `gh auth refresh -h github.com -s codespace`.';
+		}
+		
 		await vscode.window.showErrorMessage(
-			`Failed to connect to codespace: ${error.message}`
+			`Failed to connect to codespace: ${errorMessage}`
 		);
 	}
 }

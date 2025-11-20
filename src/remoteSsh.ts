@@ -30,8 +30,8 @@ export class RemoteSshBridge {
 		// First, reload SSH configs to ensure our new host is recognized
 		try {
 			await vscode.commands.executeCommand('remote-ssh.reload');
-			// Wait longer for the reload to complete and host to be recognized
-			await new Promise(resolve => setTimeout(resolve, 2000));
+			// Wait for the reload to complete and host to be recognized
+			await new Promise(resolve => setTimeout(resolve, 1000));
 		} catch {
 			// Ignore if reload command doesn't exist
 		}
@@ -39,7 +39,8 @@ export class RemoteSshBridge {
 		// Try to refresh the Remote Explorer to ensure the host appears
 		try {
 			await vscode.commands.executeCommand('remoteExplorer.refresh');
-			await new Promise(resolve => setTimeout(resolve, 1000));
+			// Brief wait for refresh to complete
+			await new Promise(resolve => setTimeout(resolve, 500));
 		} catch {
 			// Ignore if command doesn't exist
 		}
@@ -52,7 +53,6 @@ export class RemoteSshBridge {
 		
 		// Open in the same window (user can use Remote-SSH explorer to open in new window if preferred)
 		await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
-		console.log(`Opened folder with remote URI: ${remoteUri.toString()}`);
 		
 		// Connection should establish automatically
 		return;
