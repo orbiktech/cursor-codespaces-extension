@@ -67,6 +67,7 @@ Then install the generated `.vsix` file:
      - 🟢 Green circle = Available
      - 🔴 Red circle = Shutdown
      - 🟡 Yellow spinning = Starting/Other states
+   - **Note:** If GitHub CLI is not installed, you'll see installation instructions with a link to download it
 
 3. **Connect to a Codespace**
    - Click on any Codespace in the list
@@ -105,7 +106,10 @@ Then install the generated `.vsix` file:
 
 ### "GitHub CLI (gh) is not installed"
 
-**Solution:** Install GitHub CLI from https://cli.github.com/
+**Solution:** 
+- If you open the Codespaces Explorer, you'll see a helpful message with a link to install GitHub CLI
+- Or install directly from: https://cli.github.com/
+- After installation, refresh the explorer to see your Codespaces
 
 ### "GitHub CLI authentication required"
 

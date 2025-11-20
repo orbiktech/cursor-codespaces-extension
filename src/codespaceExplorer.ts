@@ -11,7 +11,6 @@ export class CodespaceTreeItem extends vscode.TreeItem {
 		
 		if (isConnecting) {
 			// Show connecting state
-			this.label = `$(sync~spin) ${codespace.repository}`;
 			this.description = 'Connecting...';
 			this.tooltip = `Connecting to ${codespace.displayName || codespace.name}...`;
 			this.iconPath = new vscode.ThemeIcon('sync~spin', new vscode.ThemeColor('charts.blue'));
@@ -42,9 +41,26 @@ export class CodespaceTreeItem extends vscode.TreeItem {
 	}
 }
 
-export class CodespaceExplorerProvider implements vscode.TreeDataProvider<CodespaceTreeItem> {
-	private _onDidChangeTreeData: vscode.EventEmitter<CodespaceTreeItem | undefined | null | void> = new vscode.EventEmitter<CodespaceTreeItem | undefined | null | void>();
-	readonly onDidChangeTreeData: vscode.Event<CodespaceTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+export class InstallationInstructionsTreeItem extends vscode.TreeItem {
+	constructor() {
+		super('GitHub CLI is not installed', vscode.TreeItemCollapsibleState.None);
+		
+		this.description = 'Click to install';
+		this.tooltip = 'GitHub CLI (gh) is required to use this extension.\n\nClick to open the installation page.';
+		this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.orange'));
+		this.command = {
+			command: 'vscode.open',
+			title: 'Install GitHub CLI',
+			arguments: [vscode.Uri.parse('https://cli.github.com/')]
+		};
+	}
+}
+
+type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem;
+
+export class CodespaceExplorerProvider implements vscode.TreeDataProvider<ExplorerTreeItem> {
+	private _onDidChangeTreeData: vscode.EventEmitter<ExplorerTreeItem | undefined | null | void> = new vscode.EventEmitter<ExplorerTreeItem | undefined | null | void>();
+	readonly onDidChangeTreeData: vscode.Event<ExplorerTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
 	private ghService: GhService;
 	private connectingCodespaces: Set<string> = new Set(); // Track which codespaces are connecting
@@ -70,11 +86,20 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Codesp
 		return this.connectingCodespaces.has(codespaceName);
 	}
 
-	getTreeItem(element: CodespaceTreeItem): vscode.TreeItem {
+	getTreeItem(element: ExplorerTreeItem): vscode.TreeItem {
 		return element;
 	}
 
-	async getChildren(element?: CodespaceTreeItem): Promise<CodespaceTreeItem[]> {
+	async getChildren(element?: ExplorerTreeItem): Promise<ExplorerTreeItem[]> {
+		// First check if GitHub CLI is installed
+		const ghInstalled = await this.ghService.checkGhInstalled();
+		if (!ghInstalled) {
+			// Return installation instructions
+			return [
+				new InstallationInstructionsTreeItem()
+			];
+		}
+
 		try {
 			// Always fetch fresh codespace list
 			const codespaces = await this.ghService.listCodespaces();
