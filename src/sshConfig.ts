@@ -1,0 +1,140 @@
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+const CONFIG_MARKER_START = '# >>> Cursor Codespaces Extension (managed)';
+const CONFIG_MARKER_END = '# <<< Cursor Codespaces Extension';
+
+export class SshConfigManager {
+	private static instance: SshConfigManager;
+	private sshConfigPath: string;
+
+	private constructor() {
+		const homeDir = os.homedir();
+		this.sshConfigPath = path.join(homeDir, '.ssh', 'config');
+	}
+
+	public static getInstance(): SshConfigManager {
+		if (!SshConfigManager.instance) {
+			SshConfigManager.instance = new SshConfigManager();
+		}
+		return SshConfigManager.instance;
+	}
+
+	/**
+	 * Read the SSH config file
+	 */
+	async readConfig(): Promise<string> {
+		try {
+			if (!fs.existsSync(this.sshConfigPath)) {
+				// Create .ssh directory if it doesn't exist
+				const sshDir = path.dirname(this.sshConfigPath);
+				if (!fs.existsSync(sshDir)) {
+					fs.mkdirSync(sshDir, { mode: 0o700 });
+				}
+				// Create empty config file
+				fs.writeFileSync(this.sshConfigPath, '', { mode: 0o600 });
+				return '';
+			}
+			return fs.readFileSync(this.sshConfigPath, 'utf-8');
+		} catch (error: any) {
+			throw new Error(`Failed to read SSH config: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Extract the managed section from config
+	 */
+	extractManagedSection(config: string): { before: string; managed: string; after: string } {
+		const startIndex = config.indexOf(CONFIG_MARKER_START);
+		const endIndex = config.indexOf(CONFIG_MARKER_END);
+
+		if (startIndex === -1 || endIndex === -1) {
+			// No managed section exists
+			return {
+				before: config,
+				managed: '',
+				after: ''
+			};
+		}
+
+		const before = config.substring(0, startIndex).trimEnd();
+		const managed = config.substring(startIndex, endIndex + CONFIG_MARKER_END.length);
+		const after = config.substring(endIndex + CONFIG_MARKER_END.length).trimStart();
+
+		return { before, managed, after };
+	}
+
+	/**
+	 * Merge new SSH config into the file
+	 */
+	async mergeConfig(newConfig: string): Promise<void> {
+		try {
+			const currentConfig = await this.readConfig();
+			const { before, after } = this.extractManagedSection(currentConfig);
+
+			// Build new managed section
+			const managedSection = [
+				CONFIG_MARKER_START,
+				newConfig.trim(),
+				CONFIG_MARKER_END
+			].join('\n');
+
+			// Combine all parts
+			const parts = [before, managedSection, after].filter(part => part.length > 0);
+			const newContent = parts.join('\n\n') + '\n';
+
+			// Ask for permission on first write
+			const hasManagedSection = currentConfig.includes(CONFIG_MARKER_START);
+			if (!hasManagedSection) {
+				const action = await vscode.window.showInformationMessage(
+					'This extension needs to modify your SSH config file (~/.ssh/config) to add Codespace entries. Continue?',
+					'Allow',
+					'Cancel'
+				);
+
+				if (action !== 'Allow') {
+					throw new Error('User declined SSH config modification');
+				}
+			}
+
+			// Write the new config
+			fs.writeFileSync(this.sshConfigPath, newContent, { mode: 0o600 });
+		} catch (error: any) {
+			throw new Error(`Failed to merge SSH config: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Extract host name from SSH config block
+	 */
+	extractHostName(configBlock: string): string | null {
+		const hostMatch = configBlock.match(/^Host\s+(\S+)/m);
+		return hostMatch ? hostMatch[1] : null;
+	}
+
+	/**
+	 * Get all managed host names
+	 */
+	async getManagedHosts(): Promise<string[]> {
+		try {
+			const config = await this.readConfig();
+			const { managed } = this.extractManagedSection(config);
+			
+			if (!managed) {
+				return [];
+			}
+
+			const hostMatches = managed.matchAll(/^Host\s+(\S+)/gm);
+			const hosts: string[] = [];
+			for (const match of hostMatches) {
+				hosts.push(match[1]);
+			}
+			return hosts;
+		} catch (error: any) {
+			throw new Error(`Failed to get managed hosts: ${error.message}`);
+		}
+	}
+}
+

@@ -1,9 +1,13 @@
 {
   "name": "cursor-codespaces",
-  "displayName": "cursor-codespaces",
+  "displayName": "Cursor Codespaces",
   "description": "Seamless Codespaces connectivity via GitHub CLI",
   "version": "0.0.1",
   "publisher": "orbiktech",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orbiktech/cursor-codespaces-extension.git"
+  },
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -17,8 +21,9 @@
   "contributes": {
     "commands": [
       {
-        "command": "cursor-codespaces.helloWorld",
-        "title": "Hello World"
+        "command": "cursorCodespaces.connect",
+        "title": "Connect to Codespace",
+        "category": "Cursor Codespaces"
       }
     ]
   },
