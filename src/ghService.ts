@@ -29,7 +29,8 @@ export class GhService {
 	 */
 	async checkGhInstalled(): Promise<boolean> {
 		try {
-			await execAsync('gh --version');
+			// Use shell to ensure proper PATH resolution on Linux
+			await execAsync('gh --version', { shell: process.platform === 'win32' ? undefined : '/bin/sh' });
 			return true;
 		} catch {
 			return false;
@@ -83,7 +84,10 @@ export class GhService {
 		try {
 			const { stdout, stderr } = await execAsync(
 				'gh codespace list --json name,displayName,state,lastUsedAt,repository',
-				{ encoding: 'utf-8' }
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
 			);
 			
 			// Empty output means no codespaces, which is valid
@@ -138,7 +142,10 @@ export class GhService {
 			// Format: POST /user/codespaces/{codespace_name}/start
 			await execAsync(
 				`gh api -X POST user/codespaces/${codespaceName}/start`,
-				{ encoding: 'utf-8' }
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
 			);
 		} catch (error: any) {
 			const errorMessage = error.stderr || error.message || '';
@@ -247,7 +254,10 @@ export class GhService {
 		try {
 			const { stdout } = await execAsync(
 				`gh codespace ssh --config -c ${codespaceName}`,
-				{ encoding: 'utf-8' }
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
 			);
 			return stdout;
 		} catch (error: any) {

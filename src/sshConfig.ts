@@ -23,22 +23,59 @@ export class SshConfigManager {
 	}
 
 	/**
+	 * Ensure SSH directory and config file have correct permissions (Linux/Unix requirement)
+	 */
+	private ensureCorrectPermissions(): void {
+		const sshDir = path.dirname(this.sshConfigPath);
+		
+		// Ensure .ssh directory exists with correct permissions (0o700)
+		if (!fs.existsSync(sshDir)) {
+			fs.mkdirSync(sshDir, { mode: 0o700, recursive: true });
+		} else {
+			// Fix permissions if directory exists but has wrong permissions
+			try {
+				fs.chmodSync(sshDir, 0o700);
+			} catch (error: any) {
+				// If we can't change permissions, log but don't fail
+				// The directory might be owned by root or have other restrictions
+				console.warn(`Could not set permissions on ${sshDir}: ${error.message}`);
+			}
+		}
+		
+		// Ensure config file has correct permissions (0o600) if it exists
+		if (fs.existsSync(this.sshConfigPath)) {
+			try {
+				fs.chmodSync(this.sshConfigPath, 0o600);
+			} catch (error: any) {
+				// If we can't change permissions, log but don't fail
+				console.warn(`Could not set permissions on ${this.sshConfigPath}: ${error.message}`);
+			}
+		}
+	}
+
+	/**
 	 * Read the SSH config file
 	 */
 	async readConfig(): Promise<string> {
 		try {
+			// Ensure correct permissions before reading
+			this.ensureCorrectPermissions();
+			
 			if (!fs.existsSync(this.sshConfigPath)) {
-				// Create .ssh directory if it doesn't exist
-				const sshDir = path.dirname(this.sshConfigPath);
-				if (!fs.existsSync(sshDir)) {
-					fs.mkdirSync(sshDir, { mode: 0o700 });
-				}
-				// Create empty config file
+				// Create empty config file with correct permissions
 				fs.writeFileSync(this.sshConfigPath, '', { mode: 0o600 });
 				return '';
 			}
 			return fs.readFileSync(this.sshConfigPath, 'utf-8');
 		} catch (error: any) {
+			// Provide more helpful error message for permission issues
+			if (error.code === 'EACCES' || error.message.includes('permission denied')) {
+				throw new Error(
+					`Permission denied accessing SSH config file. ` +
+					`Please ensure you have read/write permissions for ${this.sshConfigPath} ` +
+					`and that the .ssh directory has permissions 700.`
+				);
+			}
 			throw new Error(`Failed to read SSH config: ${error.message}`);
 		}
 	}
@@ -99,9 +136,21 @@ export class SshConfigManager {
 				}
 			}
 
-			// Write the new config
+			// Ensure correct permissions before writing
+			this.ensureCorrectPermissions();
+			
+			// Write the new config with correct permissions
 			fs.writeFileSync(this.sshConfigPath, newContent, { mode: 0o600 });
 		} catch (error: any) {
+			// Provide more helpful error message for permission issues
+			if (error.code === 'EACCES' || error.message.includes('permission denied')) {
+				throw new Error(
+					`Permission denied writing to SSH config file. ` +
+					`Please ensure you have write permissions for ${this.sshConfigPath} ` +
+					`and that the .ssh directory has permissions 700. ` +
+					`You may need to run: chmod 700 ~/.ssh && chmod 600 ~/.ssh/config`
+				);
+			}
 			throw new Error(`Failed to merge SSH config: ${error.message}`);
 		}
 	}

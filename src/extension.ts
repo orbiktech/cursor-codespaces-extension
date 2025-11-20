@@ -17,6 +17,20 @@ export function activate(context: vscode.ExtensionContext) {
 		showCollapseAll: false
 	});
 
+	// Refresh explorer when it becomes visible (e.g., when user first opens the sidebar)
+	treeView.onDidChangeVisibility((e) => {
+		if (e.visible) {
+			// View became visible, refresh to ensure latest state is shown
+			codespaceExplorerProvider.refresh();
+		}
+	});
+
+	// Initial refresh to ensure view is populated on first activation
+	// Use a small delay to ensure the view is ready
+	setTimeout(() => {
+		codespaceExplorerProvider.refresh();
+	}, 100);
+
 	context.subscriptions.push(treeView);
 
 	// Main connect command (from command palette/status bar)
