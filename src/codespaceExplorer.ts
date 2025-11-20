@@ -56,17 +56,71 @@ export class InstallationInstructionsTreeItem extends vscode.TreeItem {
 	}
 }
 
-type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem;
+export class AuthenticationRequiredTreeItem extends vscode.TreeItem {
+	constructor() {
+		super('GitHub authentication required', vscode.TreeItemCollapsibleState.None);
+		
+		this.description = 'Click to login';
+		this.tooltip = 'You need to authenticate with GitHub CLI.\n\nClick to open a terminal with the login command.\nAfter completing authentication, click the refresh button (🔄) in the explorer title bar.';
+		this.iconPath = new vscode.ThemeIcon('key', new vscode.ThemeColor('charts.orange'));
+		this.command = {
+			command: 'cursorCodespaces.openAuthTerminal',
+			title: 'Authenticate with GitHub',
+			arguments: ['gh auth login']
+		};
+	}
+}
 
-export class CodespaceExplorerProvider implements vscode.TreeDataProvider<ExplorerTreeItem> {
+export class ScopeRequiredTreeItem extends vscode.TreeItem {
+	constructor() {
+		super('Additional GitHub scopes required', vscode.TreeItemCollapsibleState.None);
+		
+		this.description = 'Click to refresh scopes';
+		this.tooltip = 'You need to grant the codespace scope.\n\nClick to open a terminal with the refresh command.\nAfter completing the refresh, click the refresh button (🔄) in the explorer title bar.';
+		this.iconPath = new vscode.ThemeIcon('key', new vscode.ThemeColor('charts.orange'));
+		this.command = {
+			command: 'cursorCodespaces.openAuthTerminal',
+			title: 'Refresh GitHub Scopes',
+			arguments: ['gh auth refresh -h github.com -s codespace']
+		};
+	}
+}
+
+type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem;
+
+export class CodespaceExplorerProvider implements vscode.TreeDataProvider<ExplorerTreeItem>, vscode.Disposable {
 	private _onDidChangeTreeData: vscode.EventEmitter<ExplorerTreeItem | undefined | null | void> = new vscode.EventEmitter<ExplorerTreeItem | undefined | null | void>();
 	readonly onDidChangeTreeData: vscode.Event<ExplorerTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
 	private ghService: GhService;
 	private connectingCodespaces: Set<string> = new Set(); // Track which codespaces are connecting
+	private pollingInterval: NodeJS.Timeout | undefined;
+	private readonly POLL_INTERVAL_MS = 3000; // Poll every 3 seconds when there's an error
 
 	constructor() {
 		this.ghService = GhService.getInstance();
+	}
+
+	dispose(): void {
+		this.stopPolling();
+	}
+
+	private startPolling(): void {
+		// Only start polling if not already polling
+		if (this.pollingInterval) {
+			return;
+		}
+
+		this.pollingInterval = setInterval(() => {
+			this.refresh();
+		}, this.POLL_INTERVAL_MS);
+	}
+
+	private stopPolling(): void {
+		if (this.pollingInterval) {
+			clearInterval(this.pollingInterval);
+			this.pollingInterval = undefined;
+		}
 	}
 
 	refresh(): void {
@@ -104,6 +158,9 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 			// Always fetch fresh codespace list
 			const codespaces = await this.ghService.listCodespaces();
 			
+			// Successfully loaded codespaces - stop polling
+			this.stopPolling();
+			
 			if (codespaces.length === 0) {
 				return [];
 			}
@@ -114,7 +171,25 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 				return new CodespaceTreeItem(codespace, vscode.TreeItemCollapsibleState.None, isConnecting);
 			});
 		} catch (error: any) {
-			// If there's an error, show a message but don't crash
+			// Handle specific error types and show helpful messages
+			if (error.name === 'AuthenticationError' || error.message === 'AUTHENTICATION_REQUIRED') {
+				// Start polling to automatically refresh when authentication is complete
+				this.startPolling();
+				return [
+					new AuthenticationRequiredTreeItem()
+				];
+			}
+			
+			if (error.name === 'ScopeError' || error.message === 'SCOPE_REQUIRED') {
+				// Start polling to automatically refresh when scopes are granted
+				this.startPolling();
+				return [
+					new ScopeRequiredTreeItem()
+				];
+			}
+			
+			// For other errors, stop polling and log but don't show anything (to avoid cluttering)
+			this.stopPolling();
 			console.error('Failed to load codespaces:', error);
 			return [];
 		}

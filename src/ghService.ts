@@ -104,7 +104,10 @@ export class GhService {
 			// If it's an auth error, throw a specific error type
 			if (errorMessage.includes('not logged in') || 
 			    errorMessage.includes('authentication required') ||
-			    errorMessage.includes('you are not logged into any github hosts')) {
+			    errorMessage.includes('you are not logged into any github hosts') ||
+			    errorMessage.includes('please run: gh auth login') ||
+			    errorMessage.includes('gh auth login') ||
+			    (errorMessage.includes('to get started') && errorMessage.includes('gh auth login'))) {
 				const authError = new Error('AUTHENTICATION_REQUIRED');
 				authError.name = 'AuthenticationError';
 				throw authError;

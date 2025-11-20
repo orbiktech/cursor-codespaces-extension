@@ -2,7 +2,7 @@
   "name": "cursor-codespaces",
   "displayName": "Cursor Codespaces",
   "description": "Seamless Codespaces connectivity via GitHub CLI",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "orbiktech",
   "repository": {
     "type": "git",

@@ -17,13 +17,25 @@ export class RemoteSshBridge {
 	 */
 	async connectToHost(hostName: string, workspacePath?: string): Promise<void> {
 		// Ensure Remote-SSH is available
-		// In Cursor, Remote-SSH is built-in, so this should always pass
 		const isAvailable = await this.checkRemoteSshAvailable();
 		if (!isAvailable) {
+			// Provide helpful error message with installation option
+			const action = await vscode.window.showErrorMessage(
+				'Remote-SSH extension is required to connect to Codespaces. Would you like to install it?',
+				'Install Remote-SSH',
+				'Cancel'
+			);
+
+			if (action === 'Install Remote-SSH') {
+				// Open the Remote-SSH extension in the marketplace
+				const remoteSshUri = vscode.Uri.parse('vscode:extension/ms-vscode-remote.remote-ssh');
+				await vscode.commands.executeCommand('vscode.open', remoteSshUri);
+				throw new Error('Please install the Remote-SSH extension and try again.');
+			}
+
 			throw new Error(
-				'Remote-SSH is not available. ' +
-				'In Cursor, Remote-SSH is built-in. ' +
-				'In VS Code, please install the Remote-SSH extension from the marketplace.'
+				'Remote-SSH extension is required. ' +
+				'Please install "Remote - SSH" (ms-vscode-remote.remote-ssh) from the marketplace.'
 			);
 		}
 
@@ -60,28 +72,34 @@ export class RemoteSshBridge {
 
 	/**
 	 * Check if Remote-SSH is available
-	 * In Cursor, Remote-SSH is built-in (Anysphere Remote SSH)
-	 * In VS Code, it's an extension
+	 * Checks for both Cursor's built-in Remote SSH and VS Code's Remote-SSH extension
 	 */
 	async checkRemoteSshAvailable(): Promise<boolean> {
-		// Check if we're in Cursor (has built-in Remote SSH) or VS Code (needs extension)
 		const extensions = vscode.extensions.all;
+		
+		// First, check for the standard VS Code Remote-SSH extension (most common)
+		const vscodeRemoteSsh = extensions.find(
+			(ext: vscode.Extension<any>) => 
+				ext.id === 'ms-vscode-remote.remote-ssh'
+		);
 		
 		// Check for Cursor's built-in Remote SSH (Anysphere Remote SSH)
 		const cursorRemoteSsh = extensions.find(
 			(ext: vscode.Extension<any>) => 
-				ext.id.includes('anysphere') && ext.id.includes('remote')
+				ext.id.includes('anysphere') && 
+				(ext.id.includes('remote') || ext.id.includes('ssh'))
 		);
 		
-		// Check for VS Code Remote-SSH extension (for VS Code compatibility)
-		const vscodeRemoteSsh = extensions.find(
+		// Check for any other Remote-SSH extension variants
+		const otherRemoteSsh = extensions.find(
 			(ext: vscode.Extension<any>) => 
-				ext.id === 'ms-vscode-remote.remote-ssh' ||
-				(ext.id.includes('remote-ssh') && !ext.id.includes('anysphere'))
+				ext.id.includes('remote-ssh') && 
+				!ext.id.includes('anysphere') &&
+				ext.id !== 'ms-vscode-remote.remote-ssh'
 		);
 		
-		// If either is available, Remote-SSH is available
-		const remoteSshExt = cursorRemoteSsh || vscodeRemoteSsh;
+		// If any Remote-SSH extension is found, it's available
+		const remoteSshExt = vscodeRemoteSsh || cursorRemoteSsh || otherRemoteSsh;
 		
 		if (!remoteSshExt) {
 			return false;
@@ -92,8 +110,8 @@ export class RemoteSshBridge {
 			try {
 				await remoteSshExt.activate();
 			} catch {
-				// Extension might not be ready yet, but that's okay - built-in features might not need activation
-				// Return true anyway since the feature exists
+				// Extension might not be ready yet, but that's okay
+				// Return true anyway since the extension exists
 				return true;
 			}
 		}

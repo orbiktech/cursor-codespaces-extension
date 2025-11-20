@@ -32,6 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
 	}, 100);
 
 	context.subscriptions.push(treeView);
+	context.subscriptions.push(codespaceExplorerProvider); // Dispose polling interval on deactivation
 
 	// Main connect command (from command palette/status bar)
 	const connectCommand = vscode.commands.registerCommand(
@@ -94,6 +95,28 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(refreshExplorerCommand);
 
+	// Open terminal with authentication command
+	const openAuthTerminalCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.openAuthTerminal',
+		async (command: string) => {
+			const terminal = vscode.window.createTerminal('GitHub CLI Authentication');
+			terminal.sendText(command);
+			terminal.show();
+			
+			// Show message with refresh button (auto-refresh is also enabled)
+			const action = await vscode.window.showInformationMessage(
+				'Please complete the authentication in the terminal. The explorer will auto-refresh, or click "Refresh Now" to refresh immediately.',
+				'Refresh Now'
+			);
+			
+			if (action === 'Refresh Now') {
+				codespaceExplorerProvider.refresh();
+			}
+		}
+	);
+
+	context.subscriptions.push(openAuthTerminalCommand);
+
 	// Create status bar item
 	const statusBarItem = vscode.window.createStatusBarItem(
 		vscode.StatusBarAlignment.Right,
@@ -122,14 +145,10 @@ async function connectToCodespace(selectedCodespace?: Codespace): Promise<void> 
 		}
 
 		// Step 2: Check if Remote-SSH is available
-		// In Cursor, Remote-SSH is built-in, so this should always pass
 		const remoteSshAvailable = await remoteSshBridge.checkRemoteSshAvailable();
 		if (!remoteSshAvailable) {
-			await vscode.window.showErrorMessage(
-				'Remote-SSH is not available. ' +
-				'In Cursor, Remote-SSH is built-in. ' +
-				'If you are using VS Code, please install the Remote-SSH extension from the marketplace.'
-			);
+			// Error message is handled in remoteSshBridge.connectToHost
+			// This check is just to prevent proceeding without Remote-SSH
 			return;
 		}
 

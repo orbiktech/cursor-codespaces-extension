@@ -19,7 +19,10 @@ A VS Code/Cursor extension that provides seamless GitHub Codespaces connectivity
   - Authenticate with: `gh auth login`
   - Required scope: `codespace`
 - **VS Code/Cursor** - Version 1.99.0 or higher
-- **Remote-SSH** - Built-in for Cursor, or install the Remote-SSH extension for VS Code
+- **Remote-SSH Extension** - Required for connecting to Codespaces
+  - **VS Code**: Install "Remote - SSH" (ms-vscode-remote.remote-ssh) from the marketplace
+  - **Cursor**: Usually built-in, but on some platforms (e.g., Linux) you may need to install it manually
+  - The extension will prompt you to install it if it's missing
 
 ## Installation
 
@@ -103,6 +106,14 @@ Then install the generated `.vsix` file:
 6. **Connection** - Opens the Codespace in your current window
 
 ## Troubleshooting
+
+### "Remote-SSH extension is required"
+
+**Solution:**
+- The extension will show a prompt to install Remote-SSH when needed
+- Click "Install Remote-SSH" to open the extension marketplace
+- Or manually install "Remote - SSH" (ms-vscode-remote.remote-ssh) from the marketplace
+- After installation, restart Cursor/VS Code and try again
 
 ### "GitHub CLI (gh) is not installed"
 
