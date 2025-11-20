@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as fs from 'fs';
+import * as os from 'os';
 
 const execAsync = promisify(exec);
 
@@ -246,6 +248,7 @@ export class GhService {
 
 	/**
 	 * Generate SSH configuration for a codespace
+	 * On Linux, this also ensures SSH keys are generated
 	 */
 	async generateSshConfig(codespaceName: string): Promise<string> {
 		// Sanitize codespace name to prevent command injection
@@ -255,14 +258,54 @@ export class GhService {
 		}
 
 		try {
-			const { stdout } = await execAsync(
+			// First, get the SSH config to see what key file it references
+			const { stdout: sshConfig } = await execAsync(
 				`gh codespace ssh --config -c ${codespaceName}`,
 				{ 
 					encoding: 'utf-8',
 					shell: process.platform === 'win32' ? undefined : '/bin/sh'
 				}
 			);
-			return stdout;
+
+			// On Linux, check if the key file exists
+			// Extract IdentityFile from the config
+			const identityFileMatch = sshConfig.match(/IdentityFile\s+(.+)/);
+			if (identityFileMatch && process.platform !== 'win32') {
+				const keyPath = identityFileMatch[1].trim();
+				const expandedKeyPath = keyPath.replace(/^~/, os.homedir());
+				
+				// Check if the key file exists
+				if (!fs.existsSync(expandedKeyPath)) {
+					// Key file doesn't exist - trigger key generation by running a test SSH command
+					// This will cause GitHub CLI to generate the keys
+					try {
+						// Run a quick command that will trigger key generation
+						// Use timeout to prevent hanging, and we'll ignore the result
+						await execAsync(
+							`timeout 5 gh codespace ssh -c ${codespaceName} -- echo "key-check" 2>&1 || true`,
+							{ 
+								encoding: 'utf-8',
+								shell: '/bin/sh',
+								timeout: 6000 // 6 second timeout
+							}
+						);
+					} catch {
+						// Ignore errors - we just want to trigger key generation
+						// The keys should now exist even if the connection failed
+					}
+					
+					// Verify the key file was created
+					if (!fs.existsSync(expandedKeyPath)) {
+						throw new Error(
+							`SSH key file not found: ${expandedKeyPath}. ` +
+							`GitHub CLI may not have generated the keys. ` +
+							`Try running 'gh codespace ssh -c ${codespaceName}' manually to generate keys.`
+						);
+					}
+				}
+			}
+
+			return sshConfig;
 		} catch (error: any) {
 			const errorMessage = error.stderr || error.message || '';
 			

@@ -117,6 +117,39 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(openAuthTerminalCommand);
 
+	// Open Remote-SSH extension in marketplace
+	const openRemoteSshExtensionCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.openRemoteSshExtension',
+		async () => {
+			try {
+				// Try to use the installExtension command first
+				await vscode.commands.executeCommand('workbench.extensions.installExtension', 'anysphere.remote-ssh');
+				await vscode.window.showInformationMessage(
+					'Installing Remote-SSH extension... The explorer will auto-refresh when installation completes, or click "Refresh Now" to refresh immediately.',
+					'Refresh Now'
+				).then(action => {
+					if (action === 'Refresh Now') {
+						codespaceExplorerProvider.refresh();
+					}
+				});
+			} catch (error) {
+				// Fallback: open extensions view with search
+				await vscode.commands.executeCommand('workbench.view.extensions');
+				await vscode.commands.executeCommand('workbench.extensions.search', 'anysphere.remote-ssh');
+				await vscode.window.showInformationMessage(
+					'Please install the Remote-SSH extension from the marketplace. The explorer will auto-refresh when installation completes, or click "Refresh Now" to refresh immediately.',
+					'Refresh Now'
+				).then(action => {
+					if (action === 'Refresh Now') {
+						codespaceExplorerProvider.refresh();
+					}
+				});
+			}
+		}
+	);
+
+	context.subscriptions.push(openRemoteSshExtensionCommand);
+
 	// Create status bar item
 	const statusBarItem = vscode.window.createStatusBarItem(
 		vscode.StatusBarAlignment.Right,
@@ -144,11 +177,9 @@ async function connectToCodespace(selectedCodespace?: Codespace): Promise<void> 
 			return;
 		}
 
-		// Step 2: Check if Remote-SSH is available
-		const remoteSshAvailable = await remoteSshBridge.checkRemoteSshAvailable();
-		if (!remoteSshAvailable) {
-			// Error message is handled in remoteSshBridge.connectToHost
-			// This check is just to prevent proceeding without Remote-SSH
+		// Step 2: Ensure Remote-SSH extension is ready
+		const remoteSshReady = await remoteSshBridge.ensureReady();
+		if (!remoteSshReady) {
 			return;
 		}
 

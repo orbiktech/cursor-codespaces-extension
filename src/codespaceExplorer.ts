@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Codespace, GhService } from './ghService';
+import { RemoteSshBridge } from './remoteSsh';
 
 export class CodespaceTreeItem extends vscode.TreeItem {
 	constructor(
@@ -86,19 +87,36 @@ export class ScopeRequiredTreeItem extends vscode.TreeItem {
 	}
 }
 
-type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem;
+export class RemoteSshRequiredTreeItem extends vscode.TreeItem {
+	constructor() {
+		super('Remote-SSH extension is not installed', vscode.TreeItemCollapsibleState.None);
+		
+		this.description = 'Click to install';
+		this.tooltip = 'Remote-SSH extension is required to connect to Codespaces.\n\nClick to open the extension marketplace.\nAfter installation, click the refresh button (🔄) in the explorer title bar.';
+		this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.orange'));
+		this.command = {
+			command: 'cursorCodespaces.openRemoteSshExtension',
+			title: 'Install Remote-SSH',
+			arguments: []
+		};
+	}
+}
+
+type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem | RemoteSshRequiredTreeItem;
 
 export class CodespaceExplorerProvider implements vscode.TreeDataProvider<ExplorerTreeItem>, vscode.Disposable {
 	private _onDidChangeTreeData: vscode.EventEmitter<ExplorerTreeItem | undefined | null | void> = new vscode.EventEmitter<ExplorerTreeItem | undefined | null | void>();
 	readonly onDidChangeTreeData: vscode.Event<ExplorerTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
 	private ghService: GhService;
+	private remoteSshBridge: RemoteSshBridge;
 	private connectingCodespaces: Set<string> = new Set(); // Track which codespaces are connecting
 	private pollingInterval: NodeJS.Timeout | undefined;
 	private readonly POLL_INTERVAL_MS = 3000; // Poll every 3 seconds when there's an error
 
 	constructor() {
 		this.ghService = GhService.getInstance();
+		this.remoteSshBridge = RemoteSshBridge.getInstance();
 	}
 
 	dispose(): void {
@@ -160,6 +178,16 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 			
 			// Successfully loaded codespaces - stop polling
 			this.stopPolling();
+			
+			// Check if Remote-SSH is available before showing codespaces
+			const remoteSshAvailable = await this.remoteSshBridge.checkRemoteSshAvailable();
+			if (!remoteSshAvailable) {
+				// Start polling to automatically refresh when Remote-SSH is installed
+				this.startPolling();
+				return [
+					new RemoteSshRequiredTreeItem()
+				];
+			}
 			
 			if (codespaces.length === 0) {
 				return [];
