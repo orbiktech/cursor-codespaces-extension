@@ -50,8 +50,8 @@ export class RemoteSshBridge {
 		const uriPath = workspacePath ? `/workspaces/${workspacePath}` : '';
 		const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${hostName}${uriPath}`);
 		
-		// Use the same options as the working extension: { forceNewWindow: true }
-		await vscode.commands.executeCommand('vscode.openFolder', remoteUri, { forceNewWindow: true });
+		// Open in the same window (user can use Remote-SSH explorer to open in new window if preferred)
+		await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
 		console.log(`Opened folder with remote URI: ${remoteUri.toString()}`);
 		
 		// Connection should establish automatically
