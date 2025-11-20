@@ -22,12 +22,17 @@ jobs:
     - name: Install Dependencies
       run: |
         npm install
-        npm install -g @vscode/vsce
+        npm install -g @vscode/vsce ovsx
 
     - name: Package Extension
       run: vsce package
 
-    - name: Publish Extension
+    - name: Publish to VS Code Marketplace
       env:
         VSCE_PAT: ${{ secrets.VSCE_PAT }}
       run: vsce publish
+
+    - name: Publish to Open VSX Registry
+      env:
+        OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      run: ovsx publish
