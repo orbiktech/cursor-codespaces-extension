@@ -96,5 +96,29 @@ export class RemoteSshBridge {
 		
 		return true;
 	}
+
+	/**
+	 * Check if there's an incompatible Remote Containers extension installed
+	 * Returns true if the incompatible VS Code Remote Containers extension is installed
+	 * and the Anysphere Remote Containers extension is not installed
+	 */
+	checkRemoteContainersIncompatibility(): boolean {
+		const extensions = vscode.extensions.all;
+		
+		// Check for incompatible VS Code Remote Containers extension
+		const vscodeRemoteContainers = extensions.find(
+			(ext: vscode.Extension<any>) => 
+				ext.id === 'ms-vscode-remote.remote-containers'
+		);
+		
+		// Check for compatible Anysphere Remote Containers extension
+		const anysphereRemoteContainers = extensions.find(
+			(ext: vscode.Extension<any>) => 
+				ext.id === 'anysphere.remote-containers'
+		);
+		
+		// Incompatible if VS Code extension is installed but Anysphere is not
+		return !!vscodeRemoteContainers && !anysphereRemoteContainers;
+	}
 }
 

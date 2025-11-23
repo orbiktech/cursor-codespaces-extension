@@ -102,7 +102,22 @@ export class RemoteSshRequiredTreeItem extends vscode.TreeItem {
 	}
 }
 
-type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem | RemoteSshRequiredTreeItem;
+export class RemoteContainersIncompatibleTreeItem extends vscode.TreeItem {
+	constructor() {
+		super('Remote Containers extension incompatibility', vscode.TreeItemCollapsibleState.None);
+		
+		this.description = 'Click to fix';
+		this.tooltip = 'The VSCode Remote Containers extension is not supported with the Anysphere Remote SSH extension.\n\nClick to uninstall the incompatible extension and install the Anysphere Remote Containers extension instead.\nAfter switching, click the refresh button (🔄) in the explorer title bar.';
+		this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.orange'));
+		this.command = {
+			command: 'cursorCodespaces.switchToAnysphereRemoteContainers',
+			title: 'Switch to Anysphere Remote Containers',
+			arguments: []
+		};
+	}
+}
+
+type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem | RemoteSshRequiredTreeItem | RemoteContainersIncompatibleTreeItem;
 
 export class CodespaceExplorerProvider implements vscode.TreeDataProvider<ExplorerTreeItem>, vscode.Disposable {
 	private _onDidChangeTreeData: vscode.EventEmitter<ExplorerTreeItem | undefined | null | void> = new vscode.EventEmitter<ExplorerTreeItem | undefined | null | void>();
@@ -169,6 +184,16 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 			// Return installation instructions
 			return [
 				new InstallationInstructionsTreeItem()
+			];
+		}
+
+		// Check for Remote Containers incompatibility before checking Remote-SSH
+		const hasIncompatibility = this.remoteSshBridge.checkRemoteContainersIncompatibility();
+		if (hasIncompatibility) {
+			// Start polling to automatically refresh when the issue is resolved
+			this.startPolling();
+			return [
+				new RemoteContainersIncompatibleTreeItem()
 			];
 		}
 

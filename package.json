@@ -2,7 +2,7 @@
   "name": "cursor-codespaces",
   "displayName": "Cursor Codespaces",
   "description": "Seamless Codespaces connectivity via GitHub CLI",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "orbiktech",
   "repository": {
     "type": "git",
@@ -13,6 +13,19 @@
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "cursor",
+    "codespaces",
+    "github",
+    "codespace",
+    "remote",
+    "ssh",
+    "remote-ssh",
+    "development",
+    "devcontainer",
+    "gh",
+    "github-cli"
   ],
   "activationEvents": [
     "onStartupFinished"

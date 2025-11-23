@@ -4,7 +4,23 @@ All notable changes to the "cursor-codespaces" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [0.3.1] - 2024-12-XX
+## [0.4.0] - 2025-11-XX
+
+### Added
+- **Custom SSH Config File Support**: Extension now detects and uses custom SSH config file location from VS Code settings (`remote.SSH.configFile`), ensuring compatibility with users who have configured a non-default SSH config path
+- **Remote Containers Extension Incompatibility Detection**: Added automatic detection and handling for incompatible VSCode Remote Containers extension, with one-click fix to switch to Anysphere Remote Containers extension
+- **Marketplace Keywords**: Added comprehensive keywords to improve extension discoverability in marketplace searches
+
+### Fixed
+- **Custom SSH Config File Location**: Fixed issue where extension would write to default SSH config location (`~/.ssh/config`) even when users had configured a custom SSH config file path, causing connection failures
+- **Remote Containers Conflict**: Fixed connection failures caused by incompatible VSCode Remote Containers extension when used with Anysphere Remote SSH extension
+
+### Improved
+- **SSH Config Path Detection**: Improved SSH config file path resolution to properly handle custom paths, including `~` expansion and relative path resolution
+- **Extension Compatibility Checks**: Enhanced dependency checking to detect and resolve extension incompatibilities before connection attempts
+- **User Experience**: Better error messages and UI guidance when extension incompatibilities are detected, matching the same helpful pattern as other dependency checks
+
+## [0.3.1] - 2025-11-XX
 
 ### Added
 - **Remote-SSH Explorer Integration**: Added tree item in explorer that shows when Remote-SSH extension is missing, with one-click installation
@@ -20,7 +36,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Remote-SSH Setup Flow**: Improved user experience for Remote-SSH installation, matching the same pattern as GitHub CLI setup
 - **Early Dependency Checks**: Remote-SSH availability is now checked early in the connection flow, preventing silent failures
 
-## [0.3.0] - 2024-12-XX
+## [0.3.0] - 2025-11-XX
 
 ### Added
 - **Installation Instructions in Sidebar**: When GitHub CLI is not installed, the sidebar now shows helpful installation instructions with a direct link to download
@@ -43,6 +59,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Shell Execution**: Improved shell command execution for better PATH resolution on Linux
 - **Icon Display**: Removed incorrect icon syntax from tree item labels that was displaying as text
 
-## [0.2.2] - 2024-XX-XX
+## [0.2.2] - 2025-11-XX
 
 - Initial release

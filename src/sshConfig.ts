@@ -11,8 +11,37 @@ export class SshConfigManager {
 	private sshConfigPath: string;
 
 	private constructor() {
+		this.sshConfigPath = this.getSshConfigPath();
+	}
+
+	/**
+	 * Get the SSH config file path, checking for custom location in VS Code settings
+	 * Follows VS Code settings precedence: workspace settings > user settings > default
+	 * This matches how Remote-SSH extension reads the configFile setting
+	 */
+	private getSshConfigPath(): string {
+		// Check for custom SSH config file location from Remote-SSH extension setting
+		// getConfiguration() automatically checks workspace settings first, then user settings
+		const customConfigFile = vscode.workspace.getConfiguration('remote.SSH').get<string>('configFile');
+		
+		if (customConfigFile && customConfigFile.trim()) {
+			let configPath = customConfigFile.trim();
+			
+			// Expand ~ to home directory if present (works on all platforms)
+			if (configPath.startsWith('~')) {
+				configPath = configPath.replace(/^~/, os.homedir());
+			}
+			
+			// Resolve to absolute path
+			// If it's already absolute, path.resolve will return it as-is
+			// If it's relative, resolve it relative to the current working directory
+			// (which is typically the workspace root or extension directory)
+			return path.resolve(configPath);
+		}
+		
+		// Default to standard location
 		const homeDir = os.homedir();
-		this.sshConfigPath = path.join(homeDir, '.ssh', 'config');
+		return path.join(homeDir, '.ssh', 'config');
 	}
 
 	public static getInstance(): SshConfigManager {
@@ -125,8 +154,15 @@ export class SshConfigManager {
 			// Ask for permission on first write
 			const hasManagedSection = currentConfig.includes(CONFIG_MARKER_START);
 			if (!hasManagedSection) {
+				// Create a user-friendly display path
+				let configFileDisplay = this.sshConfigPath;
+				const homeDir = os.homedir();
+				if (this.sshConfigPath.startsWith(homeDir)) {
+					configFileDisplay = this.sshConfigPath.replace(homeDir, '~');
+				}
+				
 				const action = await vscode.window.showInformationMessage(
-					'This extension needs to modify your SSH config file (~/.ssh/config) to add Codespace entries. Continue?',
+					`This extension needs to modify your SSH config file (${configFileDisplay}) to add Codespace entries. Continue?`,
 					'Allow',
 					'Cancel'
 				);
