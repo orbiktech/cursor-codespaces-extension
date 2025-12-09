@@ -4,21 +4,41 @@ All notable changes to the "cursor-codespaces" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [0.4.0] - 2025-11-XX
+## [0.5.0] - 2025-12-XX
 
 ### Added
-- **Custom SSH Config File Support**: Extension now detects and uses custom SSH config file location from VS Code settings (`remote.SSH.configFile`), ensuring compatibility with users who have configured a non-default SSH config path
-- **Remote Containers Extension Incompatibility Detection**: Added automatic detection and handling for incompatible VSCode Remote Containers extension, with one-click fix to switch to Anysphere Remote Containers extension
-- **Marketplace Keywords**: Added comprehensive keywords to improve extension discoverability in marketplace searches
+- **Create New Codespace**: Create codespaces directly from the extension
+  - "Create new Codespace..." item in the explorer and "+" button in the title bar
+  - Searchable repository picker with dynamic search as you type
+  - Searchable branch picker with dynamic search across all branches
+  - Machine type selection (required for organization-paid codespaces)
+  - Seamless flow: create and automatically connect to the new codespace
+- **Stop Codespace**: Stop a running codespace directly from the explorer (inline button and context menu)
+- **Delete Codespace**: Delete a codespace with confirmation dialog (inline button and context menu)
+- **Auto-Refresh for Transitional States**: Explorer automatically refreshes every 10 seconds when codespaces are in transitional states (Starting, ShuttingDown, Provisioning, etc.)
 
 ### Fixed
-- **Custom SSH Config File Location**: Fixed issue where extension would write to default SSH config location (`~/.ssh/config`) even when users had configured a custom SSH config file path, causing connection failures
-- **Remote Containers Conflict**: Fixed connection failures caused by incompatible VSCode Remote Containers extension when used with Anysphere Remote SSH extension
+- **Search Race Conditions**: Fixed race conditions in repository and branch search where old results could overwrite newer ones
 
 ### Improved
-- **SSH Config Path Detection**: Improved SSH config file path resolution to properly handle custom paths, including `~` expansion and relative path resolution
-- **Extension Compatibility Checks**: Enhanced dependency checking to detect and resolve extension incompatibilities before connection attempts
-- **User Experience**: Better error messages and UI guidance when extension incompatibilities are detected, matching the same helpful pattern as other dependency checks
+- **Repository Search**: Searches across all your repositories using GitHub API, not just the first 50
+- **Branch Search**: Uses pagination to fetch and search across all branches in a repository
+- **Codespace Creation Flow**: Streamlined UX - creation returns immediately and connection handles waiting
+
+## [0.4.0] - 2025-12-XX
+
+### Added
+- **Custom SSH Config File Support**: Extension now detects and uses custom SSH config file location from VS Code settings (`remote.SSH.configFile`)
+- **Remote Containers Extension Incompatibility Detection**: Automatic detection and one-click fix for incompatible VSCode Remote Containers extension
+- **Marketplace Keywords**: Added comprehensive keywords to improve extension discoverability
+
+### Fixed
+- **Custom SSH Config File Location**: Fixed issue where extension would write to default SSH config location even when users had configured a custom path
+- **Remote Containers Conflict**: Fixed connection failures caused by incompatible VSCode Remote Containers extension
+
+### Improved
+- **SSH Config Path Detection**: Proper handling of custom paths including `~` expansion
+- **Extension Compatibility Checks**: Enhanced dependency checking before connection attempts
 
 ## [0.3.1] - 2025-11-XX
 

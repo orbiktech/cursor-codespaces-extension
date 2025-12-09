@@ -165,6 +165,61 @@ export class GhService {
 	}
 
 	/**
+	 * Stop a codespace using GitHub API
+	 */
+	async stopCodespace(codespaceName: string): Promise<void> {
+		// Sanitize codespace name to prevent command injection
+		if (!/^[a-zA-Z0-9_-]+$/.test(codespaceName)) {
+			throw new Error('Invalid codespace name format');
+		}
+
+		try {
+			// Use GitHub API to stop the codespace
+			// Format: POST /user/codespaces/{codespace_name}/stop
+			await execAsync(
+				`gh api -X POST user/codespaces/${codespaceName}/stop`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
+			);
+		} catch (error: any) {
+			const errorMessage = error.stderr || error.message || '';
+			
+			// If codespace is already stopped, that's fine
+			if (errorMessage.includes('already stopped') || errorMessage.includes('not running')) {
+				return;
+			}
+			
+			throw new Error(`Failed to stop codespace: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Delete a codespace using GitHub API
+	 */
+	async deleteCodespace(codespaceName: string): Promise<void> {
+		// Sanitize codespace name to prevent command injection
+		if (!/^[a-zA-Z0-9_-]+$/.test(codespaceName)) {
+			throw new Error('Invalid codespace name format');
+		}
+
+		try {
+			// Use GitHub API to delete the codespace
+			// Format: DELETE /user/codespaces/{codespace_name}
+			await execAsync(
+				`gh api -X DELETE user/codespaces/${codespaceName}`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
+			);
+		} catch (error: any) {
+			throw new Error(`Failed to delete codespace: ${error.message}`);
+		}
+	}
+
+	/**
 	 * Check if codespace is available, and start it if needed, then wait for it
 	 * @param progress Optional progress reporter to update status
 	 */
@@ -315,6 +370,223 @@ export class GhService {
 			}
 			
 			throw new Error(`Failed to generate SSH config: ${error.message}`);
+		}
+	}
+
+	/**
+	 * List recent repositories the user has access to (for initial display)
+	 */
+	async listRecentRepositories(limit: number = 10): Promise<{ nameWithOwner: string; description: string }[]> {
+		try {
+			const { stdout } = await execAsync(
+				`gh repo list --json nameWithOwner,description --limit ${limit}`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
+			);
+			
+			if (!stdout || stdout.trim() === '') {
+				return [];
+			}
+			
+			return JSON.parse(stdout);
+		} catch (error: any) {
+			throw new Error(`Failed to list repositories: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Search repositories by name using GitHub API
+	 */
+	async searchRepositories(query: string): Promise<{ nameWithOwner: string; description: string }[]> {
+		if (!query || query.trim().length < 2) {
+			// For very short queries, just return recent repos
+			return this.listRecentRepositories(10);
+		}
+
+		try {
+			// Search user's repos using GitHub API
+			// This searches across all repos the user has access to
+			const { stdout } = await execAsync(
+				`gh api "search/repositories?q=${encodeURIComponent(query)}+user:@me+fork:true&per_page=20" --jq ".items | map({nameWithOwner: .full_name, description: .description})"`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
+			);
+			
+			if (!stdout || stdout.trim() === '' || stdout.trim() === '[]') {
+				// If no results from user search, try org/all repos search
+				const { stdout: allReposStdout } = await execAsync(
+					`gh api "search/repositories?q=${encodeURIComponent(query)}+in:name&per_page=20" --jq ".items | map({nameWithOwner: .full_name, description: .description})"`,
+					{ 
+						encoding: 'utf-8',
+						shell: process.platform === 'win32' ? undefined : '/bin/sh'
+					}
+				);
+				
+				if (!allReposStdout || allReposStdout.trim() === '' || allReposStdout.trim() === '[]') {
+					return [];
+				}
+				
+				return JSON.parse(allReposStdout);
+			}
+			
+			return JSON.parse(stdout);
+		} catch (error: any) {
+			console.warn(`Failed to search repositories: ${error.message}`);
+			// Fallback to listing repos if search fails
+			return this.listRecentRepositories(10);
+		}
+	}
+
+	/**
+	 * List recent branches for a repository (limited for initial display)
+	 */
+	async listRecentBranches(repo: string, limit: number = 10): Promise<string[]> {
+		try {
+			const { stdout } = await execAsync(
+				`gh api "repos/${repo}/branches?per_page=${limit}" --jq ".[].name"`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
+			);
+			
+			if (!stdout || stdout.trim() === '') {
+				return ['main', 'master']; // Fallback to common defaults
+			}
+			
+			return stdout.trim().split('\n').filter(b => b.length > 0);
+		} catch (error: any) {
+			// If we can't list branches, return common defaults
+			console.warn(`Failed to list branches for ${repo}: ${error.message}`);
+			return ['main', 'master'];
+		}
+	}
+
+	/**
+	 * Search branches for a repository by name
+	 * Uses pagination to fetch ALL branches, then filters client-side
+	 */
+	async searchBranches(repo: string, query: string): Promise<string[]> {
+		if (!query || query.trim().length < 1) {
+			return this.listRecentBranches(repo, 10);
+		}
+
+		try {
+			// Use --paginate to get ALL branches (GitHub API doesn't support branch search)
+			const { stdout } = await execAsync(
+				`gh api "repos/${repo}/branches?per_page=100" --paginate --jq ".[].name"`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh',
+					timeout: 30000 // 30 second timeout for large repos
+				}
+			);
+			
+			if (!stdout || stdout.trim() === '') {
+				return [];
+			}
+			
+			const allBranches = stdout.trim().split('\n').filter(b => b.length > 0);
+			const lowerQuery = query.toLowerCase();
+			
+			// Filter branches that match the query
+			const filtered = allBranches.filter(branch => 
+				branch.toLowerCase().includes(lowerQuery)
+			);
+			
+			// Return top 50 matches to avoid overwhelming the UI
+			return filtered.slice(0, 50);
+		} catch (error: any) {
+			console.warn(`Failed to search branches for ${repo}: ${error.message}`);
+			return [];
+		}
+	}
+
+	/**
+	 * List available machine types for a repository
+	 */
+	async listMachineTypes(repo: string): Promise<{ name: string; displayName: string; cpus: number; memoryInGb: number }[]> {
+		try {
+			const { stdout } = await execAsync(
+				`gh api "repos/${repo}/codespaces/machines" --jq ".machines | map({name: .name, displayName: .display_name, cpus: .cpus, memoryInGb: .memory_in_bytes / 1073741824})"`,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh'
+				}
+			);
+			
+			if (!stdout || stdout.trim() === '' || stdout.trim() === 'null') {
+				return [];
+			}
+			
+			return JSON.parse(stdout);
+		} catch (error: any) {
+			console.warn(`Failed to list machine types for ${repo}: ${error.message}`);
+			return [];
+		}
+	}
+
+	/**
+	 * Create a new codespace
+	 * Returns immediately after creation starts - does not wait for it to be fully available
+	 */
+	async createCodespace(
+		repo: string,
+		branch?: string,
+		machine?: string
+	): Promise<Codespace> {
+		// Build the command - no --status flag so it returns immediately
+		let command = `gh codespace create --repo ${repo}`;
+		
+		if (branch) {
+			command += ` --branch ${branch}`;
+		}
+		
+		if (machine) {
+			command += ` --machine ${machine}`;
+		}
+
+		try {
+			const { stdout } = await execAsync(
+				command,
+				{ 
+					encoding: 'utf-8',
+					shell: process.platform === 'win32' ? undefined : '/bin/sh',
+					timeout: 60000 // 1 minute timeout - creation request should be quick
+				}
+			);
+			
+			// The command outputs the codespace name
+			const codespaceName = stdout.trim();
+			
+			if (!codespaceName) {
+				throw new Error('No codespace name returned from creation command');
+			}
+
+			// Return a codespace object - it will be in "Starting" state
+			// The connect flow will handle waiting for it to become available
+			return {
+				name: codespaceName,
+				displayName: codespaceName,
+				state: 'Starting',
+				repository: repo
+			};
+		} catch (error: any) {
+			const errorMessage = error.stderr || error.message || '';
+			
+			if (errorMessage.includes('already exists')) {
+				throw new Error('A codespace already exists for this repository and branch. Please use an existing codespace or delete it first.');
+			}
+			
+			if (errorMessage.includes('billing') || errorMessage.includes('limit')) {
+				throw new Error('Unable to create codespace. You may have reached your codespace limit or there may be billing issues.');
+			}
+			
+			throw new Error(`Failed to create codespace: ${error.message}`);
 		}
 	}
 

@@ -117,7 +117,39 @@ export class RemoteContainersIncompatibleTreeItem extends vscode.TreeItem {
 	}
 }
 
-type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem | RemoteSshRequiredTreeItem | RemoteContainersIncompatibleTreeItem;
+export class CreateCodespaceTreeItem extends vscode.TreeItem {
+	constructor() {
+		super('Create new Codespace...', vscode.TreeItemCollapsibleState.None);
+		
+		this.description = '';
+		this.tooltip = 'Create a new GitHub Codespace for a repository';
+		this.iconPath = new vscode.ThemeIcon('add', new vscode.ThemeColor('charts.green'));
+		this.contextValue = 'createCodespace';
+		this.command = {
+			command: 'cursorCodespaces.createCodespace',
+			title: 'Create Codespace',
+			arguments: []
+		};
+	}
+}
+
+// Transitional states that require auto-refresh
+// These are states where the codespace is changing and will eventually reach a stable state
+const TRANSITIONAL_STATES = [
+	'Starting',
+	'Stopping',
+	'ShuttingDown',
+	'Provisioning',
+	'Rebuilding',
+	'Updating',
+	'Awaiting',
+	'Queued',
+	'Exporting',
+	'Pending',
+	'Creating'
+];
+
+type ExplorerTreeItem = CodespaceTreeItem | InstallationInstructionsTreeItem | AuthenticationRequiredTreeItem | ScopeRequiredTreeItem | RemoteSshRequiredTreeItem | RemoteContainersIncompatibleTreeItem | CreateCodespaceTreeItem;
 
 export class CodespaceExplorerProvider implements vscode.TreeDataProvider<ExplorerTreeItem>, vscode.Disposable {
 	private _onDidChangeTreeData: vscode.EventEmitter<ExplorerTreeItem | undefined | null | void> = new vscode.EventEmitter<ExplorerTreeItem | undefined | null | void>();
@@ -127,7 +159,8 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 	private remoteSshBridge: RemoteSshBridge;
 	private connectingCodespaces: Set<string> = new Set(); // Track which codespaces are connecting
 	private pollingInterval: NodeJS.Timeout | undefined;
-	private readonly POLL_INTERVAL_MS = 3000; // Poll every 3 seconds when there's an error
+	private readonly ERROR_POLL_INTERVAL_MS = 3000; // Poll every 3 seconds when there's an error
+	private readonly TRANSITIONAL_POLL_INTERVAL_MS = 10000; // Poll every 10 seconds for transitional states
 
 	constructor() {
 		this.ghService = GhService.getInstance();
@@ -138,15 +171,16 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 		this.stopPolling();
 	}
 
-	private startPolling(): void {
-		// Only start polling if not already polling
+	private startPolling(intervalMs: number = this.ERROR_POLL_INTERVAL_MS): void {
+		// Stop existing polling if interval is different
 		if (this.pollingInterval) {
+			// Already polling, don't restart
 			return;
 		}
 
 		this.pollingInterval = setInterval(() => {
 			this.refresh();
-		}, this.POLL_INTERVAL_MS);
+		}, intervalMs);
 	}
 
 	private stopPolling(): void {
@@ -154,6 +188,12 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 			clearInterval(this.pollingInterval);
 			this.pollingInterval = undefined;
 		}
+	}
+
+	private isTransitionalState(state: string): boolean {
+		return TRANSITIONAL_STATES.some(s => 
+			state.toLowerCase().includes(s.toLowerCase())
+		);
 	}
 
 	refresh(): void {
@@ -191,7 +231,8 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 		const hasIncompatibility = this.remoteSshBridge.checkRemoteContainersIncompatibility();
 		if (hasIncompatibility) {
 			// Start polling to automatically refresh when the issue is resolved
-			this.startPolling();
+			this.stopPolling();
+			this.startPolling(this.ERROR_POLL_INTERVAL_MS);
 			return [
 				new RemoteContainersIncompatibleTreeItem()
 			];
@@ -201,33 +242,49 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 			// Always fetch fresh codespace list
 			const codespaces = await this.ghService.listCodespaces();
 			
-			// Successfully loaded codespaces - stop polling
-			this.stopPolling();
-			
 			// Check if Remote-SSH is available before showing codespaces
 			const remoteSshAvailable = await this.remoteSshBridge.checkRemoteSshAvailable();
 			if (!remoteSshAvailable) {
 				// Start polling to automatically refresh when Remote-SSH is installed
-				this.startPolling();
+				this.stopPolling();
+				this.startPolling(this.ERROR_POLL_INTERVAL_MS);
 				return [
 					new RemoteSshRequiredTreeItem()
 				];
 			}
 			
-			if (codespaces.length === 0) {
-				return [];
+			// Build the list with "Create new..." at the top
+			const items: ExplorerTreeItem[] = [new CreateCodespaceTreeItem()];
+
+			// Check if any codespace is in a transitional state
+			const hasTransitionalState = codespaces.some(cs => this.isTransitionalState(cs.state));
+			
+			if (hasTransitionalState) {
+				// Start polling to refresh when transitional states complete
+				this.stopPolling();
+				this.startPolling(this.TRANSITIONAL_POLL_INTERVAL_MS);
+			} else {
+				// No transitional states, stop polling
+				this.stopPolling();
 			}
 
-			// Return all codespaces as tree items, checking if any are connecting
-			return codespaces.map(codespace => {
+			if (codespaces.length === 0) {
+				return items;
+			}
+
+			// Add all codespaces as tree items, checking if any are connecting
+			codespaces.forEach(codespace => {
 				const isConnecting = this.isConnecting(codespace.name);
-				return new CodespaceTreeItem(codespace, vscode.TreeItemCollapsibleState.None, isConnecting);
+				items.push(new CodespaceTreeItem(codespace, vscode.TreeItemCollapsibleState.None, isConnecting));
 			});
+
+			return items;
 		} catch (error: any) {
 			// Handle specific error types and show helpful messages
 			if (error.name === 'AuthenticationError' || error.message === 'AUTHENTICATION_REQUIRED') {
 				// Start polling to automatically refresh when authentication is complete
-				this.startPolling();
+				this.stopPolling();
+				this.startPolling(this.ERROR_POLL_INTERVAL_MS);
 				return [
 					new AuthenticationRequiredTreeItem()
 				];
@@ -235,7 +292,8 @@ export class CodespaceExplorerProvider implements vscode.TreeDataProvider<Explor
 			
 			if (error.name === 'ScopeError' || error.message === 'SCOPE_REQUIRED') {
 				// Start polling to automatically refresh when scopes are granted
-				this.startPolling();
+				this.stopPolling();
+				this.startPolling(this.ERROR_POLL_INTERVAL_MS);
 				return [
 					new ScopeRequiredTreeItem()
 				];

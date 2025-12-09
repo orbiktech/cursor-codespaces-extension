@@ -5,12 +5,14 @@ A VS Code/Cursor extension that provides seamless GitHub Codespaces connectivity
 ## Features
 
 - 🚀 **One-Click Connection** - Connect to any Codespace with a single click
+- ➕ **Create Codespaces** - Create new codespaces with searchable repository and branch selection
 - 📋 **Custom Explorer View** - Browse all your Codespaces in a dedicated sidebar view
 - 🔄 **Auto-Start** - Automatically starts shutdown Codespaces before connecting
-- ⚡ **Real-Time Status** - See the current state of all your Codespaces (Available, Shutdown, Starting, etc.)
-- 🔐 **Automatic SSH Config** - Manages SSH configuration automatically
+- ⏹️ **Stop & Delete** - Stop or delete codespaces directly from the explorer
+- ⚡ **Real-Time Status** - See the current state of all your Codespaces with auto-refresh for transitional states
+- 🔐 **Automatic SSH Config** - Manages SSH configuration automatically (supports custom config paths)
 - 🎯 **Smart Status Bar** - Quick access button in the status bar
-- 🔄 **Auto-Refresh** - Always shows the latest Codespace status
+- 🔍 **Smart Search** - Search across all your repositories and branches when creating codespaces
 
 ## Requirements
 
@@ -79,9 +81,25 @@ Then install the generated `.vsix` file:
      - Update SSH configuration automatically
      - Open the connection in the current window
 
-4. **Refresh the List**
+4. **Create a New Codespace**
+   - Click the "+" button in the explorer title bar, or click "Create new Codespace..." in the list
+   - Search and select a repository (searches across all your repos as you type)
+   - Search and select a branch (searches across all branches)
+   - Select a machine type (for organization-paid codespaces)
+   - The codespace will be created and connected automatically
+
+5. **Stop a Codespace**
+   - Click the stop button (⏹️) next to a running codespace
+   - Or right-click and select "Stop Codespace"
+
+6. **Delete a Codespace**
+   - Click the delete button (🗑️) next to any codespace
+   - Or right-click and select "Delete Codespace"
+   - Confirm the deletion in the dialog
+
+7. **Refresh the List**
    - Click the refresh button (🔄) in the explorer title bar
-   - Or use Command Palette: `Cursor Codespaces: Refresh Explorer`
+   - The list auto-refreshes every 10 seconds when codespaces are in transitional states
 
 ### Method 2: Status Bar Button
 
@@ -98,12 +116,20 @@ Then install the generated `.vsix` file:
 
 ## How It Works
 
+### Connecting to a Codespace
 1. **Authentication Check** - Verifies GitHub CLI is installed and authenticated
 2. **Codespace Selection** - Lists all your Codespaces with current status
 3. **Auto-Start** - If Codespace is shutdown, starts it via GitHub API
 4. **Status Monitoring** - Waits for Codespace to become available (up to 5 minutes)
 5. **SSH Configuration** - Generates and merges SSH config automatically
 6. **Connection** - Opens the Codespace in your current window
+
+### Creating a New Codespace
+1. **Repository Selection** - Search across all your repositories
+2. **Branch Selection** - Search across all branches in the selected repo
+3. **Machine Type** - Select compute resources (required for org-paid repos)
+4. **Creation** - Codespace is created and connection starts automatically
+5. **Auto-Refresh** - Explorer updates as the codespace provisions
 
 ## Troubleshooting
 
@@ -156,6 +182,20 @@ Then install the generated `.vsix` file:
 - Wait a few seconds for the workspace to load
 - Check the Remote-SSH output panel for any errors
 - Try clicking the host in the Remote-SSH explorer manually
+
+### "Remote Containers extension incompatibility"
+
+**Solution:**
+- The VSCode Remote Containers extension conflicts with Anysphere Remote SSH
+- Click "Switch to Anysphere Remote Containers" in the explorer
+- Or manually uninstall `ms-vscode-remote.remote-containers` and install `anysphere.remote-containers`
+
+### "Error getting machine type" when creating codespace
+
+**Solution:**
+- This occurs with organization-paid codespaces that require machine type selection
+- The extension now prompts you to select a machine type during creation
+- If this error persists, try creating the codespace from GitHub.com
 
 ## Extension Settings
 

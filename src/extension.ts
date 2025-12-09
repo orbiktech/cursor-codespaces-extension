@@ -10,6 +10,9 @@ import { Codespace } from './ghService';
 export function activate(context: vscode.ExtensionContext) {
 	// Extension activated
 
+	// Get service instances
+	const ghService = GhService.getInstance();
+
 	// Create codespace explorer
 	const codespaceExplorerProvider = new CodespaceExplorerProvider();
 	const treeView = vscode.window.createTreeView('codespacesExplorer', {
@@ -84,6 +87,86 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	context.subscriptions.push(connectFromExplorerCommand);
+
+	// Stop codespace command
+	const stopCodespaceCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.stopCodespace',
+		async (item: CodespaceTreeItem) => {
+			if (!item || !item.codespace) {
+				return;
+			}
+
+			const codespace = item.codespace;
+			
+			if (codespace.state === 'Shutdown') {
+				vscode.window.showInformationMessage('Codespace is already stopped.');
+				return;
+			}
+
+			try {
+				await vscode.window.withProgress(
+					{
+						location: vscode.ProgressLocation.Notification,
+						title: `Stopping codespace...`,
+						cancellable: false
+					},
+					async () => {
+						await ghService.stopCodespace(codespace.name);
+					}
+				);
+				
+				codespaceExplorerProvider.refresh();
+				vscode.window.showInformationMessage(`Codespace stopped.`);
+			} catch (error: any) {
+				vscode.window.showErrorMessage(`Failed to stop codespace: ${error.message}`);
+			}
+		}
+	);
+
+	context.subscriptions.push(stopCodespaceCommand);
+
+	// Delete codespace command
+	const deleteCodespaceCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.deleteCodespace',
+		async (item: CodespaceTreeItem) => {
+			if (!item || !item.codespace) {
+				return;
+			}
+
+			const codespace = item.codespace;
+			
+			// Confirm deletion
+			const confirm = await vscode.window.showWarningMessage(
+				`Are you sure you want to delete the codespace for "${codespace.repository}"? This action cannot be undone.`,
+				{ modal: true },
+				'Delete'
+			);
+
+			if (confirm !== 'Delete') {
+				return;
+			}
+
+			try {
+				await vscode.window.withProgress(
+					{
+						location: vscode.ProgressLocation.Notification,
+						title: `Deleting codespace...`,
+						cancellable: false
+					},
+					async () => {
+						await ghService.deleteCodespace(codespace.name);
+					}
+				);
+				
+				codespaceExplorerProvider.refresh();
+				vscode.window.showInformationMessage(`Codespace deleted.`);
+			} catch (error: any) {
+				vscode.window.showErrorMessage(`Failed to delete codespace: ${error.message}`);
+			}
+		}
+	);
+
+	context.subscriptions.push(deleteCodespaceCommand);
 
 	// Refresh explorer command
 	const refreshExplorerCommand = vscode.commands.registerCommand(
@@ -231,6 +314,331 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	context.subscriptions.push(switchToAnysphereRemoteContainersCommand);
+
+	// Create new codespace command
+	const createCodespaceCommand = vscode.commands.registerCommand(
+		'cursorCodespaces.createCodespace',
+		async () => {
+			const ghService = GhService.getInstance();
+
+			try {
+				// Step 1: Ensure GitHub CLI is ready
+				const isReady = await ghService.ensureReady();
+				if (!isReady) {
+					return;
+				}
+
+				// Step 2: Get repository - show searchable quick pick
+				const repo = await new Promise<string | undefined>((resolve) => {
+					const quickPick = vscode.window.createQuickPick();
+					quickPick.title = 'Create Codespace - Select Repository';
+					quickPick.placeholder = 'Search for a repository or enter owner/repo...';
+					quickPick.matchOnDescription = false; // Disable built-in filtering, use our custom search
+					quickPick.matchOnDetail = false;
+					quickPick.busy = true;
+
+					let searchTimeout: NodeJS.Timeout | undefined;
+					let isDisposed = false;
+					let currentRequestId = 0; // Track request to prevent race conditions
+
+					// Load initial repos
+					const initialRequestId = ++currentRequestId;
+					ghService.listRecentRepositories(10).then(repos => {
+						if (isDisposed || currentRequestId !== initialRequestId) {
+							return;
+						}
+						const items: vscode.QuickPickItem[] = repos.map(r => ({
+							label: r.nameWithOwner,
+							description: r.description || ''
+						}));
+						quickPick.items = items;
+						quickPick.busy = false;
+					}).catch(() => {
+						if (isDisposed || currentRequestId !== initialRequestId) {
+							return;
+						}
+						quickPick.items = [];
+						quickPick.busy = false;
+					});
+
+					// Search as user types
+					quickPick.onDidChangeValue(value => {
+						if (searchTimeout) {
+							clearTimeout(searchTimeout);
+						}
+
+						// Increment request ID to invalidate any pending requests
+						const requestId = ++currentRequestId;
+
+						if (value.length < 2) {
+							// For short input, show recent repos
+							quickPick.busy = true;
+							ghService.listRecentRepositories(10).then(repos => {
+								if (isDisposed || currentRequestId !== requestId) {
+									return; // Stale request, ignore
+								}
+								quickPick.items = repos.map(r => ({
+									label: r.nameWithOwner,
+									description: r.description || ''
+								}));
+								quickPick.busy = false;
+							}).catch(() => {
+								if (isDisposed || currentRequestId !== requestId) {
+									return;
+								}
+								quickPick.busy = false;
+							});
+							return;
+						}
+
+						// Debounce search
+						searchTimeout = setTimeout(async () => {
+							if (isDisposed || currentRequestId !== requestId) {
+								return; // Stale request, ignore
+							}
+							quickPick.busy = true;
+							try {
+								const repos = await ghService.searchRepositories(value);
+								if (isDisposed || currentRequestId !== requestId) {
+									return; // Stale request, ignore
+								}
+								quickPick.items = repos.map(r => ({
+									label: r.nameWithOwner,
+									description: r.description || ''
+								}));
+							} catch {
+								// Keep existing items on error
+							}
+							if (currentRequestId === requestId) {
+								quickPick.busy = false;
+							}
+						}, 300);
+					});
+
+					quickPick.onDidAccept(() => {
+						const selected = quickPick.selectedItems[0];
+						if (selected) {
+							resolve(selected.label);
+						} else if (quickPick.value && quickPick.value.includes('/')) {
+							// User typed a repo directly
+							resolve(quickPick.value);
+						} else {
+							resolve(undefined);
+						}
+						quickPick.dispose();
+					});
+
+					quickPick.onDidHide(() => {
+						isDisposed = true;
+						if (searchTimeout) {
+							clearTimeout(searchTimeout);
+						}
+						resolve(undefined);
+						quickPick.dispose();
+					});
+
+					quickPick.show();
+				});
+
+				if (!repo) {
+					return; // User cancelled
+				}
+
+				// Step 3: Get branch (optional) - show searchable quick pick
+				// Use special marker to distinguish cancellation from "use default branch"
+				const CANCELLED = Symbol('cancelled');
+				const branchResult = await new Promise<string | undefined | typeof CANCELLED>((resolve) => {
+					const quickPick = vscode.window.createQuickPick();
+					quickPick.title = 'Create Codespace - Select Branch';
+					quickPick.placeholder = 'Search for a branch or type branch name...';
+					quickPick.matchOnDescription = false; // Disable built-in filtering, use our custom search
+					quickPick.matchOnDetail = false;
+					quickPick.busy = true;
+
+					let searchTimeout: NodeJS.Timeout | undefined;
+					let isDisposed = false;
+					let currentRequestId = 0;
+					let didAccept = false;
+
+					const defaultBranchItem: vscode.QuickPickItem = {
+						label: '$(git-branch) Use default branch',
+						description: 'Let GitHub choose the default branch'
+					};
+
+					// Load initial branches
+					const initialRequestId = ++currentRequestId;
+					ghService.listRecentBranches(repo, 10).then(branches => {
+						if (isDisposed || currentRequestId !== initialRequestId) {
+							return;
+						}
+						const items: vscode.QuickPickItem[] = [defaultBranchItem];
+						branches.forEach(b => {
+							items.push({
+								label: b,
+								description: b === 'main' || b === 'master' ? 'default' : ''
+							});
+						});
+						quickPick.items = items;
+						quickPick.busy = false;
+					}).catch(() => {
+						if (isDisposed || currentRequestId !== initialRequestId) {
+							return;
+						}
+						quickPick.items = [defaultBranchItem];
+						quickPick.busy = false;
+					});
+
+					// Search as user types
+					quickPick.onDidChangeValue(value => {
+						if (searchTimeout) {
+							clearTimeout(searchTimeout);
+						}
+
+						const requestId = ++currentRequestId;
+
+						if (value.length < 1) {
+							// For empty input, show recent branches
+							quickPick.busy = true;
+							ghService.listRecentBranches(repo, 10).then(branches => {
+								if (isDisposed || currentRequestId !== requestId) {
+									return;
+								}
+								const items: vscode.QuickPickItem[] = [defaultBranchItem];
+								branches.forEach(b => {
+									items.push({
+										label: b,
+										description: b === 'main' || b === 'master' ? 'default' : ''
+									});
+								});
+								quickPick.items = items;
+								quickPick.busy = false;
+							}).catch(() => {
+								if (isDisposed || currentRequestId !== requestId) {
+									return;
+								}
+								quickPick.busy = false;
+							});
+							return;
+						}
+
+						// Debounce search
+						searchTimeout = setTimeout(async () => {
+							if (isDisposed || currentRequestId !== requestId) {
+								return;
+							}
+							quickPick.busy = true;
+							try {
+								const branches = await ghService.searchBranches(repo, value);
+								if (isDisposed || currentRequestId !== requestId) {
+									return;
+								}
+								const items: vscode.QuickPickItem[] = [defaultBranchItem];
+								branches.forEach(b => {
+									items.push({
+										label: b,
+										description: b === 'main' || b === 'master' ? 'default' : ''
+									});
+								});
+								quickPick.items = items;
+							} catch {
+								// Keep existing items on error
+							}
+							if (currentRequestId === requestId) {
+								quickPick.busy = false;
+							}
+						}, 200);
+					});
+
+					quickPick.onDidAccept(() => {
+						didAccept = true;
+						const selected = quickPick.selectedItems[0];
+						if (selected) {
+							if (selected.label.includes('Use default branch')) {
+								resolve(undefined); // undefined means use default
+							} else {
+								resolve(selected.label);
+							}
+						} else if (quickPick.value) {
+							// User typed a branch directly
+							resolve(quickPick.value);
+						} else {
+							resolve(undefined);
+						}
+						quickPick.dispose();
+					});
+
+					quickPick.onDidHide(() => {
+						isDisposed = true;
+						if (searchTimeout) {
+							clearTimeout(searchTimeout);
+						}
+						if (!didAccept) {
+							resolve(CANCELLED);
+						}
+						quickPick.dispose();
+					});
+
+					quickPick.show();
+				});
+
+				if (branchResult === CANCELLED) {
+					return; // User cancelled
+				}
+
+				const branch = branchResult;
+
+				// Step 4: Get machine type - required for org-paid codespaces
+				let machine: string | undefined;
+				const machineTypes = await vscode.window.withProgress(
+					{
+						location: vscode.ProgressLocation.Notification,
+						title: 'Loading machine types...',
+						cancellable: false
+					},
+					async () => {
+						return await ghService.listMachineTypes(repo);
+					}
+				);
+
+				if (machineTypes.length > 0) {
+					// Show machine type selection
+					const machineItems: vscode.QuickPickItem[] = machineTypes.map(m => ({
+						label: m.displayName || m.name,
+						description: `${m.cpus} cores, ${Math.round(m.memoryInGb)}GB RAM`,
+						detail: m.name
+					}));
+
+					const machineInput = await vscode.window.showQuickPick(machineItems, {
+						placeHolder: 'Select a machine type',
+						title: 'Create Codespace - Select Machine Type'
+					});
+
+					if (!machineInput) {
+						return; // User cancelled
+					}
+
+					machine = machineInput.detail;
+				}
+
+				// Step 5: Create the codespace (returns immediately, codespace starts in background)
+				const createdCodespace = await ghService.createCodespace(repo, branch, machine);
+
+				// Step 6: Refresh the explorer (will show new codespace in "Starting" state)
+				codespaceExplorerProvider.refresh();
+				
+				// Step 7: Connect to the newly created codespace
+				// The connect flow will wait for it to become available
+				await connectToCodespace(createdCodespace);
+
+			} catch (error: any) {
+				await vscode.window.showErrorMessage(
+					`Failed to create codespace: ${error.message}`
+				);
+			}
+		}
+	);
+
+	context.subscriptions.push(createCodespaceCommand);
 
 	// Create status bar item
 	const statusBarItem = vscode.window.createStatusBarItem(
